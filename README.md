@@ -1,71 +1,49 @@
-# encyclipedia-agent
+# Encylipedia Helper
 
-Cross-platform **local helper** for encyclipedia clip jobs.
+Install this **once** on a computer at home or in the studio. Then clip
+from the web app or your phone. This machine downloads YouTube; encyclipedia
+does the rest in the cloud.
 
-YouTube blocks Cloud Run (and often residential proxies) from downloading
-video files. This helper runs on the customer's computer — Windows, macOS,
-or Linux — so yt-dlp uses **their** ISP IP. Cloud workers still do LLM
-detection, autocrop, and publish.
+You do **not** need Node, Homebrew, or yt-dlp. The installer sets those up.
 
-A GUI desktop app is unnecessary for v1: any machine with Node 20+ and
-yt-dlp can run the same commands. Wrap this CLI in Electron/Tauri later
-if you want a window.
+## Install
 
-## Setup (like a self-hosted Cursor agent)
-
-1. Install Node 20+ and [yt-dlp](https://github.com/yt-dlp/yt-dlp#installation) on PATH.
-2. Sign in once on that machine.
-3. Leave `start` running. Clip from the web app or phone from anywhere.
+**Mac or Linux** — paste this in Terminal:
 
 ```bash
-cp .env.example .env   # or export the vars
-pnpm install
-pnpm build
-
-export ENCYCLIPEDIA_API_URL=https://api.encyclipedia.ai
-export ENCYCLIPEDIA_FIREBASE_API_KEY=...   # same as NEXT_PUBLIC_FIREBASE_API_KEY
-
-encyclipedia-agent login
-encyclipedia-agent start
+curl -fsSL https://raw.githubusercontent.com/encyclipedia-ai/encyclipedia-agent/main/install.sh | bash
 ```
 
-Dev against emulators:
+**Windows** — paste this in PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/encyclipedia-ai/encyclipedia-agent/main/install.ps1 | iex
+```
+
+Sign in with the same email you use at [app.encyclipedia.ai](https://app.encyclipedia.ai).
+The helper then runs in the background and starts when you log in.
+
+That is the whole setup. Clip from https://app.encyclipedia.ai/clipper
+
+## Commands (optional)
+
+| Command | What it does |
+| --- | --- |
+| `encyclipedia-agent` | Sign in (if needed) and run in the background |
+| `encyclipedia-agent stop` | Stop the background helper |
+| `encyclipedia-agent logout` | Sign out |
+| `encyclipedia-agent uninstall` | Remove the login-item / startup task |
+
+Power users: `start` (foreground), `clip <url>`.
+
+## Developers
 
 ```bash
 export ENCYCLIPEDIA_API_URL=http://localhost:3001
 export FIREBASE_AUTH_EMULATOR_HOST=localhost:9099
-export ENCYCLIPEDIA_FIREBASE_API_KEY=fake-api-key
+pnpm install
+pnpm dev
 ```
 
-Config is stored at `~/.encyclipedia/agent.json` (mode 0600).
-
-## Commands
-
-| Command | What it does |
-| --- | --- |
-| `login` | Firebase email/password; registers this device |
-| `logout` | Drop the stored session |
-| `whoami` | Print uid / email / device id |
-| `start` | Heartbeat + claim loop. Leave this running to accept web/mobile jobs |
-| `clip <url>` | Download locally and enqueue immediately (no waiting job) |
-
-`--length medium` is supported on `clip`.
-
-## Remote clip flow
-
-```
-phone / web                    this machine                         cloud
-  POST /process  ─────────►  job status=awaiting_media
-  (from anywhere)                 │
-                                  ├ start polls POST /agent/jobs/claim
-                                  ├ yt-dlp download + captions
-                                  ├ PUT source.mp4 → GCS
-                                  └ POST /agent/jobs/:id/complete ─► Pub/Sub
-                                                                      │
-                                                               Cloud Run worker
-                                                               (no YouTube fetch)
-                                                               detect + ffmpeg + autocrop
-```
-
-`clip <url>` skips the waiting-job step: it uploads first, then
-`POST /api/agent/jobs` creates a `queued` job immediately.
+Prebuilt binaries are published from `.github/workflows/release.yml` on
+`agent-v*` tags. Config lives at `~/.encyclipedia/agent.json`.

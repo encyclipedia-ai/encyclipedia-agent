@@ -2,13 +2,16 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import type { VideoInfo } from "./api.js";
+import { toolPaths } from "./tools.js";
 
 function run(
   argv: string[],
   opts: { cwd?: string } = {},
 ): Promise<{ stdout: string; stderr: string }> {
+  const tools = toolPaths();
+  const prefix = tools.ffmpeg ? ["--ffmpeg-location", tools.ffmpeg] : [];
   return new Promise((resolve, reject) => {
-    const child = spawn("yt-dlp", argv, {
+    const child = spawn(tools.ytdlp, [...prefix, ...argv], {
       cwd: opts.cwd,
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -25,9 +28,7 @@ function run(
     });
     child.on("error", (err) => {
       reject(
-        new Error(
-          `yt-dlp is not installed or not on PATH (${err.message}). Install: https://github.com/yt-dlp/yt-dlp#installation`,
-        ),
+        new Error(`Could not start the video downloader (${err.message}).`),
       );
     });
     child.on("close", (code) => {

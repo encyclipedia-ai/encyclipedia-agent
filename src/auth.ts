@@ -42,9 +42,7 @@ export async function signInWithPassword(
   password: string,
 ): Promise<AgentConfig> {
   if (!cfg.firebaseApiKey) {
-    throw new Error(
-      "Missing Firebase API key. Set ENCYCLIPEDIA_FIREBASE_API_KEY or save it in ~/.encyclipedia/agent.json",
-    );
+    throw new Error("Missing sign-in configuration. Reinstall Encylipedia Helper.");
   }
   const res = await fetch(
     `${identityBase(cfg)}/accounts:signInWithPassword?key=${encodeURIComponent(cfg.firebaseApiKey)}`,
@@ -72,14 +70,14 @@ export async function signInWithPassword(
 
 export async function ensureFreshToken(cfg: AgentConfig): Promise<AgentConfig> {
   if (!cfg.idToken) {
-    throw new Error("Not signed in. Run `encyclipedia-agent login`.");
+    throw new Error("Not signed in. Run Encylipedia Helper again to sign in.");
   }
   const skewMs = 60_000;
   if (cfg.idTokenExpiresAt && Date.now() + skewMs < cfg.idTokenExpiresAt) {
     return cfg;
   }
   if (!cfg.refreshToken) {
-    throw new Error("Session expired. Run `encyclipedia-agent login`.");
+    throw new Error("Session expired. Run Encylipedia Helper again to sign in.");
   }
   const res = await fetch(
     `${tokenBase(cfg)}/token?key=${encodeURIComponent(cfg.firebaseApiKey)}`,

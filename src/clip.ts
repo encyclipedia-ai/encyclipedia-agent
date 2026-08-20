@@ -26,7 +26,7 @@ export async function ingestSource(
     const { videoPath, captionsPath } = await downloadSource(url, workDir);
     console.log(`  video: ${videoPath}`);
     if (captionsPath) console.log(`  captions: ${captionsPath}`);
-    else console.warn("  no captions file — worker will try YouTube captions as fallback");
+    else console.warn("  no captions file — cloud render will try YouTube captions as fallback");
 
     console.log("Requesting upload URLs…");
     const videoTarget = await api.requestUploadUrl(cfg, video.id, "video", "video/mp4");

@@ -2,14 +2,16 @@
   "name": "@encyclipedia-ai/agent",
   "version": "0.1.0",
   "private": true,
-  "description": "Cross-platform local helper: download YouTube on the customer's machine and hand the file to encyclipedia clip workers.",
+  "description": "Encylipedia Helper: install on a customer computer so YouTube downloads happen on their network, then cloud workers render clips.",
   "license": "UNLICENSED",
   "type": "module",
   "bin": {
     "encyclipedia-agent": "./dist/index.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "install.sh",
+    "install.ps1"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
