@@ -5,7 +5,7 @@ import { stdin as input, stdout as output } from "node:process";
 import { clearSession, loadConfig, saveConfig, configPath } from "./config.js";
 import { ensureFreshToken, signInWithPassword } from "./auth.js";
 import * as api from "./api.js";
-import { runClip } from "./clip.js";
+import { runClip, fulfillRemoteJob } from "./clip.js";
 
 function usage(): never {
   console.log(`encyclipedia-agent — local YouTube ingest helper
@@ -15,7 +15,7 @@ Usage:
   encyclipedia-agent logout
   encyclipedia-agent whoami
   encyclipedia-agent clip <youtube-url> [--length short|medium]
-  encyclipedia-agent start
+  encyclipedia-agent start                 poll for web/mobile jobs (leave running)
 
 Environment:
   ENCYCLIPEDIA_API_URL              default http://localhost:3001
@@ -100,14 +100,36 @@ async function cmdStart(): Promise<void> {
   let cfg = await ensureFreshToken(loadConfig());
   await api.register(cfg, `${os.platform()}-${os.arch()}`, os.hostname());
   console.log(`Helper online as device ${cfg.deviceId}`);
-  console.log("Web-submitted awaiting_media jobs are not wired yet; use `clip <url>`.");
+  console.log("Leave this running. Clip from the web app or phone — this machine downloads YouTube.");
   console.log("Ctrl+C to stop.");
+  let lastHeartbeat = 0;
   for (;;) {
     cfg = await ensureFreshToken(cfg);
-    await api.heartbeat(cfg).catch((err: Error) => {
-      console.warn(`heartbeat failed: ${err.message}`);
-    });
-    await new Promise((r) => setTimeout(r, 15_000));
+    const now = Date.now();
+    if (now - lastHeartbeat >= 15_000) {
+      await api.heartbeat(cfg).catch((err: Error) => {
+        console.warn(`heartbeat failed: ${err.message}`);
+      });
+      lastHeartbeat = now;
+    }
+    let claim: api.ClaimedJob | null = null;
+    try {
+      claim = await api.claimJob(cfg);
+    } catch (err) {
+      console.warn(`claim failed: ${err instanceof Error ? err.message : err}`);
+    }
+    if (claim) {
+      console.log(`\nClaimed ${claim.jobId}`);
+      console.log(`  ${claim.youtubeUrl}`);
+      try {
+        await fulfillRemoteJob(cfg, claim);
+      } catch (err) {
+        console.error(`Job ${claim.jobId} failed: ${err instanceof Error ? err.message : err}`);
+      }
+      lastHeartbeat = 0;
+      continue;
+    }
+    await new Promise((r) => setTimeout(r, 3_000));
   }
 }
 

@@ -121,3 +121,47 @@ export function getJob(cfg: AgentConfig, jobId: string) {
     `/api/jobs/${encodeURIComponent(jobId)}`,
   );
 }
+
+export interface ClaimedJob {
+  jobId: string;
+  youtubeUrl: string;
+  clipLength: "short" | "medium";
+  videoId: string | null;
+}
+
+export async function claimJob(cfg: AgentConfig): Promise<ClaimedJob | null> {
+  const result = await request<ClaimedJob | undefined>(cfg, "/api/agent/jobs/claim", {
+    method: "POST",
+    body: JSON.stringify({ deviceId: cfg.deviceId }),
+  });
+  return result ?? null;
+}
+
+export function completeJob(
+  cfg: AgentConfig,
+  jobId: string,
+  body: {
+    video: VideoInfo;
+    source: { bucket: string; objectKey: string; subtitleKey?: string };
+  },
+) {
+  return request<{ jobId: string; status: string }>(
+    cfg,
+    `/api/agent/jobs/${encodeURIComponent(jobId)}/complete`,
+    {
+      method: "POST",
+      body: JSON.stringify({ ...body, deviceId: cfg.deviceId }),
+    },
+  );
+}
+
+export function failJob(cfg: AgentConfig, jobId: string, message: string) {
+  return request<{ jobId: string; status: string }>(
+    cfg,
+    `/api/agent/jobs/${encodeURIComponent(jobId)}/fail`,
+    {
+      method: "POST",
+      body: JSON.stringify({ message }),
+    },
+  );
+}

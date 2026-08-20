@@ -11,27 +11,22 @@ A GUI desktop app is unnecessary for v1: any machine with Node 20+ and
 yt-dlp can run the same commands. Wrap this CLI in Electron/Tauri later
 if you want a window.
 
-## Requirements
+## Setup (like a self-hosted Cursor agent)
 
-- Node.js 20+
-- [yt-dlp](https://github.com/yt-dlp/yt-dlp#installation) on `PATH`
-- An encyclipedia account (same Firebase login as the web app)
-
-## Setup
+1. Install Node 20+ and [yt-dlp](https://github.com/yt-dlp/yt-dlp#installation) on PATH.
+2. Sign in once on that machine.
+3. Leave `start` running. Clip from the web app or phone from anywhere.
 
 ```bash
 cp .env.example .env   # or export the vars
 pnpm install
 pnpm build
-pnpm start login
-```
 
-```bash
 export ENCYCLIPEDIA_API_URL=https://api.encyclipedia.ai
 export ENCYCLIPEDIA_FIREBASE_API_KEY=...   # same as NEXT_PUBLIC_FIREBASE_API_KEY
 
 encyclipedia-agent login
-encyclipedia-agent clip 'https://www.youtube.com/watch?v=VIDEO_ID'
+encyclipedia-agent start
 ```
 
 Dev against emulators:
@@ -51,29 +46,26 @@ Config is stored at `~/.encyclipedia/agent.json` (mode 0600).
 | `login` | Firebase email/password; registers this device |
 | `logout` | Drop the stored session |
 | `whoami` | Print uid / email / device id |
-| `clip <url>` | Download locally, upload to GCS, enqueue the existing worker |
-| `start` | Heartbeat loop (web `awaiting_media` claim comes next) |
+| `start` | Heartbeat + claim loop. Leave this running to accept web/mobile jobs |
+| `clip <url>` | Download locally and enqueue immediately (no waiting job) |
 
 `--length medium` is supported on `clip`.
 
-## How it fits
+## Remote clip flow
 
 ```
-helper (this repo)                 cloud
-  yt-dlp dump-json + download
-  PUT source.mp4 + captions  →  GCS (signed URL from API)
-  POST /api/agent/jobs       →  Pub/Sub clip.process.requested
-                                    ↓
-                               Cloud Run worker
-                               (no YouTube media fetch)
-                               detect + ffmpeg cut + autocrop
+phone / web                    this machine                         cloud
+  POST /process  ─────────►  job status=awaiting_media
+  (from anywhere)                 │
+                                  ├ start polls POST /agent/jobs/claim
+                                  ├ yt-dlp download + captions
+                                  ├ PUT source.mp4 → GCS
+                                  └ POST /agent/jobs/:id/complete ─► Pub/Sub
+                                                                      │
+                                                               Cloud Run worker
+                                                               (no YouTube fetch)
+                                                               detect + ffmpeg + autocrop
 ```
 
-The worker still runs on the node cluster. This repo only replaces
-**YouTube video download**.
-
-## Web / mobile later
-
-`GET /api/agent/jobs/next` is reserved for jobs the dashboard creates in
-`awaiting_media`. Until that status is written by `POST /process`, submit
-URLs with `clip` (or paste the URL in this helper).
+`clip <url>` skips the waiting-job step: it uploads first, then
+`POST /api/agent/jobs` creates a `queued` job immediately.
