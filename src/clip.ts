@@ -6,7 +6,7 @@ import * as api from "./api.js";
 import { AgentApiError } from "./api.js";
 import type { QueuePatch } from "./job-queue.js";
 import { putFile } from "./upload.js";
-import { downloadSource, dumpVideoInfo, sweepDownloadTemps } from "./ytdlp.js";
+import { downloadSection, downloadSource, dumpVideoInfo, sweepDownloadTemps } from "./ytdlp.js";
 
 const TERMINAL = new Set(["done", "error", "cancelled"]);
 
@@ -159,6 +159,61 @@ export async function handoffRemoteJob(
     say(onLog, "Handing off to cloud render…", { phase: "upload", percent: 100 });
     await api.completeJob(cfg, claim.jobId, { video, source });
     return claim.jobId;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (!(err instanceof AgentApiError && err.status === 409)) {
+      await api.failJob(cfg, claim.jobId, message).catch(() => {});
+    }
+    throw err;
+  }
+}
+
+export async function handoffRecut(
+  cfg: AgentConfig,
+  claim: api.ClaimedJob,
+  onLog?: LogFn,
+): Promise<string> {
+  const startSec = Number(claim.startSec);
+  const durationSec = Number(claim.durationSec);
+  if (!Number.isFinite(startSec) || !Number.isFinite(durationSec) || durationSec <= 0) {
+    throw new Error("Recut job is missing a valid time window.");
+  }
+  try {
+    if (claim.title) say(onLog, claim.title, { title: claim.title });
+    sweepDownloadTemps();
+    const workDir = await fs.mkdtemp(path.join(os.tmpdir(), "encyclipedia-agent-"));
+    try {
+      say(onLog, "Downloading the clip window…", { phase: "download", percent: 0 });
+      const videoPath = await downloadSection(
+        claim.youtubeUrl,
+        startSec,
+        durationSec,
+        workDir,
+        (update) => {
+          onLog?.({
+            phase: "download",
+            percent: update.percent,
+            detail: update.detail,
+          });
+        },
+      );
+      say(onLog, "Uploading the clip window…", { phase: "upload", percent: 0 });
+      const target = await api.requestUploadUrl(cfg, claim.jobId, "recut", "video/mp4");
+      await putFile(target, videoPath, (percent, sent, total) => {
+        onLog?.({
+          phase: "upload",
+          percent,
+          detail: `Uploading ${percent}% · ${formatBytes(sent)} of ${formatBytes(total)}`,
+        });
+      });
+      say(onLog, "Handing off to cloud recut…", { phase: "upload", percent: 100 });
+      await api.completeJob(cfg, claim.jobId, {
+        source: { bucket: target.bucket, objectKey: target.objectKey },
+      });
+      return claim.jobId;
+    } finally {
+      await fs.rm(workDir, { recursive: true, force: true }).catch(() => {});
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (!(err instanceof AgentApiError && err.status === 409)) {

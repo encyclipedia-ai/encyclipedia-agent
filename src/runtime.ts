@@ -4,6 +4,7 @@ import { ensureFreshToken, signInWithIdp, signInWithPassword } from "./auth.js";
 import * as api from "./api.js";
 import {
   handoffLocalClip,
+  handoffRecut,
   handoffRemoteJob,
   runClip,
   waitForWorker,
@@ -184,16 +185,20 @@ export function startHelperLoop(onUpdate: HelperListener): () => void {
     };
     let cloudJobId: string;
     if (item.remoteJobId) {
-      cloudJobId = await handoffRemoteJob(
-        authed,
-        {
-          jobId: item.remoteJobId,
-          youtubeUrl: item.url,
-          clipLength: item.clipLength,
-          videoId: null,
-        },
-        onLog,
-      );
+      const claim = {
+        jobId: item.remoteJobId,
+        youtubeUrl: item.url,
+        clipLength: item.clipLength,
+        videoId: null,
+        kind: item.kind,
+        startSec: item.startSec,
+        durationSec: item.durationSec,
+        title: item.title ?? undefined,
+      };
+      cloudJobId =
+        item.kind === "recut"
+          ? await handoffRecut(authed, claim, onLog)
+          : await handoffRemoteJob(authed, claim, onLog);
     } else {
       cloudJobId = await handoffLocalClip(authed, item.url, item.clipLength, onLog);
     }

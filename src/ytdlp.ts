@@ -412,6 +412,64 @@ function clearMediaFiles(workDir: string): void {
   }
 }
 
+function recutYoutubeFormat(): string {
+  const free = tmpFreeBytes();
+  if (free < 200 * 1024 * 1024) {
+    throw new NoSpaceError();
+  }
+  return "bestvideo[height<=1080]+bestaudio/best[height<=1080]";
+}
+
+function formatSectionTime(totalSeconds: number): string {
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = Math.floor(totalSeconds % 60);
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
+/** Download only [startSec, startSec+durationSec] — recuts are ~30–90s, not the full VOD. */
+export async function downloadSection(
+  url: string,
+  startSec: number,
+  durationSec: number,
+  workDir: string,
+  onProgress?: YtdlpProgressFn,
+): Promise<string> {
+  fs.mkdirSync(workDir, { recursive: true });
+  const output = path.join(workDir, "recut.%(ext)s");
+  const section = `*${formatSectionTime(startSec)}-${formatSectionTime(startSec + durationSec)}`;
+  const format = recutYoutubeFormat();
+  const argv = [
+    "--newline",
+    "--no-playlist",
+    "--no-part",
+    "--download-sections",
+    section,
+    "-f",
+    format,
+    "--merge-output-format",
+    "mp4",
+    "--force-keyframes-at-cuts",
+    "--output",
+    output,
+  ];
+
+  await run([...argv, url], { cwd: workDir, onProgress });
+
+  const files = fs.readdirSync(workDir);
+  let video =
+    files.find((f) => f === "recut.mp4") ?? files.find((f) => f.endsWith(".mp4"));
+  if (!video) {
+    const other = files.find((f) => /\.(mkv|webm|mov)$/i.test(f));
+    if (!other) throw new Error("yt-dlp finished but no clip file was produced");
+    onProgress?.({ percent: 100, detail: "Converting to mp4…" });
+    const dest = path.join(workDir, "recut.mp4");
+    await remuxToMp4(path.join(workDir, other), dest);
+    video = "recut.mp4";
+  }
+  return path.join(workDir, video);
+}
+
 export async function downloadSource(
   url: string,
   workDir: string,

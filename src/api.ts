@@ -94,7 +94,7 @@ export function me(cfg: AgentConfig) {
 export function requestUploadUrl(
   cfg: AgentConfig,
   videoId: string,
-  kind: "video" | "captions",
+  kind: "video" | "captions" | "recut",
   contentType: string,
 ) {
   return request<UploadTarget>(cfg, "/api/agent/upload-url", {
@@ -134,6 +134,10 @@ export interface ClaimedJob {
   youtubeUrl: string;
   clipLength: "short" | "medium";
   videoId: string | null;
+  kind?: "process" | "recut";
+  startSec?: number;
+  durationSec?: number;
+  title?: string;
 }
 
 export async function claimJob(cfg: AgentConfig): Promise<ClaimedJob | null> {
@@ -148,7 +152,7 @@ export function completeJob(
   cfg: AgentConfig,
   jobId: string,
   body: {
-    video: VideoInfo;
+    video?: VideoInfo;
     source: { bucket: string; objectKey: string; subtitleKey?: string };
   },
 ) {

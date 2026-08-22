@@ -12,9 +12,12 @@ export interface QueueItem {
   url: string;
   title: string | null;
   source: "local" | "remote";
+  kind?: "process" | "recut";
   clipLength: "short" | "medium";
   remoteJobId?: string;
   cloudJobId?: string;
+  startSec?: number;
+  durationSec?: number;
   phase: WorkPhase;
   percent: number | null;
   detail: string;
@@ -94,6 +97,9 @@ function makeItem(
   input: Pick<QueueItem, "url" | "clipLength" | "source"> & {
     remoteJobId?: string;
     title?: string | null;
+    kind?: "process" | "recut";
+    startSec?: number;
+    durationSec?: number;
   },
 ): QueueItem {
   return {
@@ -101,8 +107,11 @@ function makeItem(
     url: input.url,
     title: input.title ?? null,
     source: input.source,
+    kind: input.kind,
     clipLength: input.clipLength,
     remoteJobId: input.remoteJobId,
+    startSec: input.startSec,
+    durationSec: input.durationSec,
     phase: "queued",
     percent: null,
     detail: "In line",
@@ -125,6 +134,10 @@ export function enqueueRemote(claim: {
   jobId: string;
   youtubeUrl: string;
   clipLength: "short" | "medium";
+  kind?: "process" | "recut";
+  startSec?: number;
+  durationSec?: number;
+  title?: string;
 }): QueueItem | null {
   if (items.some((item) => item.remoteJobId === claim.jobId && item.phase !== "done" && item.phase !== "error")) {
     return null;
@@ -134,6 +147,10 @@ export function enqueueRemote(claim: {
     clipLength: claim.clipLength,
     source: "remote",
     remoteJobId: claim.jobId,
+    kind: claim.kind === "recut" ? "recut" : "process",
+    startSec: claim.startSec,
+    durationSec: claim.durationSec,
+    title: claim.title ?? null,
   });
   items.push(item);
   emit();
