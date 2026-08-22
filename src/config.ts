@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { PRODUCTION_API_URL, PRODUCTION_FIREBASE_API_KEY } from "./defaults.js";
 
 export interface AgentConfig {
   apiUrl: string;
@@ -33,10 +34,12 @@ export function loadConfig(): AgentConfig {
   const apiUrl = (
     process.env.ENCYCLIPEDIA_API_URL ??
     stored.apiUrl ??
-    "http://localhost:3001"
+    PRODUCTION_API_URL
   ).replace(/\/$/, "");
   const firebaseApiKey =
-    process.env.ENCYCLIPEDIA_FIREBASE_API_KEY ?? stored.firebaseApiKey ?? "";
+    process.env.ENCYCLIPEDIA_FIREBASE_API_KEY ??
+    stored.firebaseApiKey ??
+    PRODUCTION_FIREBASE_API_KEY;
   const authEmulatorHost =
     process.env.FIREBASE_AUTH_EMULATOR_HOST ?? stored.authEmulatorHost;
 

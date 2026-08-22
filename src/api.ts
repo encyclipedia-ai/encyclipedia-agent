@@ -1,4 +1,5 @@
 import type { AgentConfig } from "./config.js";
+import { ensureFreshToken } from "./auth.js";
 
 export class AgentApiError extends Error {
   constructor(
@@ -33,16 +34,18 @@ async function request<T>(
   cfg: AgentConfig,
   path: string,
   init: RequestInit = {},
+  retried = false,
 ): Promise<T> {
+  let authed = await ensureFreshToken(cfg);
   const headers: Record<string, string> = {
     Accept: "application/json",
     ...(init.headers as Record<string, string> | undefined),
   };
-  if (cfg.idToken) headers.Authorization = `Bearer ${cfg.idToken}`;
+  if (authed.idToken) headers.Authorization = `Bearer ${authed.idToken}`;
   if (init.body && !headers["Content-Type"]) {
     headers["Content-Type"] = "application/json";
   }
-  const res = await fetch(`${cfg.apiUrl}${path}`, { ...init, headers });
+  const res = await fetch(`${authed.apiUrl}${path}`, { ...init, headers });
   if (res.status === 204) return undefined as T;
   const text = await res.text();
   let parsed: unknown = undefined;
@@ -52,6 +55,10 @@ async function request<T>(
     } catch {
       parsed = text;
     }
+  }
+  if (res.status === 401 && !retried) {
+    authed = await ensureFreshToken({ ...authed, idTokenExpiresAt: 0 });
+    return request(authed, path, init, true);
   }
   if (!res.ok) {
     const message =
@@ -87,7 +94,7 @@ export function me(cfg: AgentConfig) {
 export function requestUploadUrl(
   cfg: AgentConfig,
   videoId: string,
-  kind: "video" | "captions",
+  kind: "video" | "captions" | "recut",
   contentType: string,
 ) {
   return request<UploadTarget>(cfg, "/api/agent/upload-url", {
@@ -119,5 +126,53 @@ export function getJob(cfg: AgentConfig, jobId: string) {
   return request<{ id: string; status: string; progress: string; error?: string }>(
     cfg,
     `/api/jobs/${encodeURIComponent(jobId)}`,
+  );
+}
+
+export interface ClaimedJob {
+  jobId: string;
+  youtubeUrl: string;
+  clipLength: "short" | "medium";
+  videoId: string | null;
+  kind?: "process" | "recut";
+  startSec?: number;
+  durationSec?: number;
+  title?: string;
+}
+
+export async function claimJob(cfg: AgentConfig): Promise<ClaimedJob | null> {
+  const result = await request<ClaimedJob | undefined>(cfg, "/api/agent/jobs/claim", {
+    method: "POST",
+    body: JSON.stringify({ deviceId: cfg.deviceId }),
+  });
+  return result ?? null;
+}
+
+export function completeJob(
+  cfg: AgentConfig,
+  jobId: string,
+  body: {
+    video?: VideoInfo;
+    source: { bucket: string; objectKey: string; subtitleKey?: string };
+  },
+) {
+  return request<{ jobId: string; status: string }>(
+    cfg,
+    `/api/agent/jobs/${encodeURIComponent(jobId)}/complete`,
+    {
+      method: "POST",
+      body: JSON.stringify({ ...body, deviceId: cfg.deviceId }),
+    },
+  );
+}
+
+export function failJob(cfg: AgentConfig, jobId: string, message: string) {
+  return request<{ jobId: string; status: string }>(
+    cfg,
+    `/api/agent/jobs/${encodeURIComponent(jobId)}/fail`,
+    {
+      method: "POST",
+      body: JSON.stringify({ message }),
+    },
   );
 }

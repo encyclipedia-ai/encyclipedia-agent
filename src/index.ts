@@ -1,28 +1,33 @@
 #!/usr/bin/env node
-import os from "node:os";
 import readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
-import { clearSession, loadConfig, saveConfig, configPath } from "./config.js";
-import { ensureFreshToken, signInWithPassword } from "./auth.js";
-import * as api from "./api.js";
-import { runClip } from "./clip.js";
+import { configPath } from "./config.js";
+import {
+  clipFromUrl,
+  restoreSession,
+  signIn,
+  signOut,
+  startHelperLoop,
+} from "./runtime.js";
+import { ensureTools } from "./tools.js";
+import {
+  installBackgroundService,
+  spawnForegroundDetached,
+  stopBackgroundService,
+  uninstallBackgroundService,
+} from "./service.js";
 
 function usage(): never {
-  console.log(`encyclipedia-agent — local YouTube ingest helper
+  console.log(`Encylipedia Helper
 
-Usage:
-  encyclipedia-agent login
-  encyclipedia-agent logout
-  encyclipedia-agent whoami
-  encyclipedia-agent clip <youtube-url> [--length short|medium]
-  encyclipedia-agent start
+Open the desktop app to clip. This CLI is optional.
 
-Environment:
-  ENCYCLIPEDIA_API_URL              default http://localhost:3001
-  ENCYCLIPEDIA_FIREBASE_API_KEY     Firebase web API key
-  FIREBASE_AUTH_EMULATOR_HOST       optional, e.g. localhost:9099
+  encyclipedia-agent              Sign in and run in the background
+  encyclipedia-agent stop         Stop the background helper
+  encyclipedia-agent logout       Sign out
+  encyclipedia-agent uninstall    Remove the background helper
 
-Requires yt-dlp on PATH. Config: ${configPath()}
+Config: ${configPath()}
 `);
   process.exit(1);
 }
@@ -65,69 +70,89 @@ async function prompt(question: string, hidden = false): Promise<string> {
 }
 
 async function cmdLogin(): Promise<void> {
-  let cfg = loadConfig();
-  if (!cfg.firebaseApiKey) {
-    cfg.firebaseApiKey = await prompt("Firebase API key: ");
-    saveConfig(cfg);
-  }
+  console.log("Sign in with the same email you use at app.encyclipedia.ai");
   const email = await prompt("Email: ");
   const password = await prompt("Password: ", true);
-  cfg = await signInWithPassword(cfg, email, password);
-  cfg = await ensureFreshToken(cfg);
-  await api.register(cfg, `${os.platform()}-${os.arch()}`, os.hostname());
-  const profile = await api.me(cfg);
-  console.log(`Signed in as ${profile.email ?? profile.uid}`);
-}
-
-async function cmdWhoami(): Promise<void> {
-  const cfg = await ensureFreshToken(loadConfig());
-  const profile = await api.me(cfg);
-  console.log(JSON.stringify({ ...profile, deviceId: cfg.deviceId, apiUrl: cfg.apiUrl }, null, 2));
-}
-
-async function cmdClip(args: string[]): Promise<void> {
-  const url = args.find((a) => !a.startsWith("--"));
-  if (!url) usage();
-  let length: "short" | "medium" = "short";
-  const li = args.indexOf("--length");
-  if (li >= 0 && args[li + 1] === "medium") length = "medium";
-  const cfg = await ensureFreshToken(loadConfig());
-  await api.register(cfg, `${os.platform()}-${os.arch()}`, os.hostname());
-  await runClip(cfg, url, length);
+  const cfg = await signIn(email, password);
+  console.log(`Signed in as ${cfg.email ?? cfg.uid}`);
 }
 
 async function cmdStart(): Promise<void> {
-  let cfg = await ensureFreshToken(loadConfig());
-  await api.register(cfg, `${os.platform()}-${os.arch()}`, os.hostname());
-  console.log(`Helper online as device ${cfg.deviceId}`);
-  console.log("Web-submitted awaiting_media jobs are not wired yet; use `clip <url>`.");
-  console.log("Ctrl+C to stop.");
   for (;;) {
-    cfg = await ensureFreshToken(cfg);
-    await api.heartbeat(cfg).catch((err: Error) => {
-      console.warn(`heartbeat failed: ${err.message}`);
+    const session = await restoreSession();
+    if (!session) await cmdLogin();
+    await new Promise<void>((resolve) => {
+      const stop = startHelperLoop((snap) => {
+        console.log(snap.message);
+        if (snap.status === "signed_out") {
+          stop();
+          resolve();
+        }
+      });
     });
-    await new Promise((r) => setTimeout(r, 15_000));
+  }
+}
+
+async function cmdSetup(): Promise<void> {
+  console.log("");
+  console.log("Encylipedia Helper");
+  console.log("Prefer the desktop app: pnpm app   (or the downloaded Helper.app)");
+  console.log("");
+  await ensureTools();
+  const session = await restoreSession();
+  if (!session) await cmdLogin();
+  try {
+    await installBackgroundService();
+    console.log("Helper is running in the background and will start when you log in.");
+    console.log("Clip from https://app.encyclipedia.ai/clipper");
+  } catch (err) {
+    console.warn(
+      `Could not install a background service (${err instanceof Error ? err.message : err}).`,
+    );
+    try {
+      spawnForegroundDetached();
+      console.log("Helper is running. You can close this window.");
+    } catch {
+      await cmdStart();
+    }
   }
 }
 
 const [cmd, ...rest] = process.argv.slice(2);
 switch (cmd) {
+  case undefined:
+  case "":
+  case "setup":
+    await cmdSetup();
+    break;
   case "login":
     await cmdLogin();
     break;
   case "logout":
-    clearSession(loadConfig());
+    signOut();
     console.log("Signed out.");
     break;
-  case "whoami":
-    await cmdWhoami();
+  case "clip": {
+    const url = rest.find((a) => !a.startsWith("--"));
+    if (!url) usage();
+    let length: "short" | "medium" = "short";
+    const li = rest.indexOf("--length");
+    if (li >= 0 && rest[li + 1] === "medium") length = "medium";
+    await clipFromUrl(url, length, (update) =>
+      console.log(typeof update === "string" ? update : update.detail ?? ""),
+    );
     break;
-  case "clip":
-    await cmdClip(rest);
-    break;
+  }
   case "start":
     await cmdStart();
+    break;
+  case "stop":
+    stopBackgroundService();
+    console.log("Helper stopped.");
+    break;
+  case "uninstall":
+    uninstallBackgroundService();
+    console.log("Background helper removed.");
     break;
   default:
     usage();
