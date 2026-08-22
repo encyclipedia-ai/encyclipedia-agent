@@ -1,4 +1,5 @@
 import type { AgentConfig } from "./config.js";
+import { ensureFreshToken } from "./auth.js";
 
 export class AgentApiError extends Error {
   constructor(
@@ -33,16 +34,18 @@ async function request<T>(
   cfg: AgentConfig,
   path: string,
   init: RequestInit = {},
+  retried = false,
 ): Promise<T> {
+  let authed = await ensureFreshToken(cfg);
   const headers: Record<string, string> = {
     Accept: "application/json",
     ...(init.headers as Record<string, string> | undefined),
   };
-  if (cfg.idToken) headers.Authorization = `Bearer ${cfg.idToken}`;
+  if (authed.idToken) headers.Authorization = `Bearer ${authed.idToken}`;
   if (init.body && !headers["Content-Type"]) {
     headers["Content-Type"] = "application/json";
   }
-  const res = await fetch(`${cfg.apiUrl}${path}`, { ...init, headers });
+  const res = await fetch(`${authed.apiUrl}${path}`, { ...init, headers });
   if (res.status === 204) return undefined as T;
   const text = await res.text();
   let parsed: unknown = undefined;
@@ -52,6 +55,10 @@ async function request<T>(
     } catch {
       parsed = text;
     }
+  }
+  if (res.status === 401 && !retried) {
+    authed = await ensureFreshToken({ ...authed, idTokenExpiresAt: 0 });
+    return request(authed, path, init, true);
   }
   if (!res.ok) {
     const message =

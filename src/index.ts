@@ -1,11 +1,14 @@
 #!/usr/bin/env node
-import os from "node:os";
 import readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
-import { clearSession, loadConfig, saveConfig, configPath } from "./config.js";
-import { ensureFreshToken, signInWithPassword } from "./auth.js";
-import * as api from "./api.js";
-import { runClip, fulfillRemoteJob } from "./clip.js";
+import { configPath } from "./config.js";
+import {
+  clipFromUrl,
+  restoreSession,
+  signIn,
+  signOut,
+  startHelperLoop,
+} from "./runtime.js";
 import { ensureTools } from "./tools.js";
 import {
   installBackgroundService,
@@ -17,15 +20,13 @@ import {
 function usage(): never {
   console.log(`Encylipedia Helper
 
-Install once on a computer at home or in the studio. Then clip from
-the web app or phone — this machine downloads YouTube in the background.
+Open the desktop app to clip. This CLI is optional.
 
   encyclipedia-agent              Sign in and run in the background
   encyclipedia-agent stop         Stop the background helper
   encyclipedia-agent logout       Sign out
   encyclipedia-agent uninstall    Remove the background helper
 
-Power users: start, login, whoami, clip <url>
 Config: ${configPath()}
 `);
   process.exit(1);
@@ -69,111 +70,45 @@ async function prompt(question: string, hidden = false): Promise<string> {
 }
 
 async function cmdLogin(): Promise<void> {
-  let cfg = loadConfig();
-  saveConfig(cfg);
   console.log("Sign in with the same email you use at app.encyclipedia.ai");
   const email = await prompt("Email: ");
   const password = await prompt("Password: ", true);
-  cfg = await signInWithPassword(cfg, email, password);
-  cfg = await ensureFreshToken(cfg);
-  await api.register(cfg, `${os.platform()}-${os.arch()}`, os.hostname());
-  const profile = await api.me(cfg);
-  console.log(`Signed in as ${profile.email ?? profile.uid}`);
-}
-
-async function ensureSignedIn(): Promise<void> {
-  const cfg = loadConfig();
-  saveConfig(cfg);
-  if (!cfg.idToken) {
-    await cmdLogin();
-    return;
-  }
-  try {
-    await ensureFreshToken(cfg);
-    await api.register(cfg, `${os.platform()}-${os.arch()}`, os.hostname());
-  } catch {
-    console.log("Please sign in again.");
-    await cmdLogin();
-  }
-}
-
-async function cmdWhoami(): Promise<void> {
-  const cfg = await ensureFreshToken(loadConfig());
-  const profile = await api.me(cfg);
-  console.log(JSON.stringify({ ...profile, deviceId: cfg.deviceId, apiUrl: cfg.apiUrl }, null, 2));
-}
-
-async function cmdClip(args: string[]): Promise<void> {
-  const url = args.find((a) => !a.startsWith("--"));
-  if (!url) usage();
-  let length: "short" | "medium" = "short";
-  const li = args.indexOf("--length");
-  if (li >= 0 && args[li + 1] === "medium") length = "medium";
-  await ensureTools();
-  await ensureSignedIn();
-  const cfg = await ensureFreshToken(loadConfig());
-  await api.register(cfg, `${os.platform()}-${os.arch()}`, os.hostname());
-  await runClip(cfg, url, length);
+  const cfg = await signIn(email, password);
+  console.log(`Signed in as ${cfg.email ?? cfg.uid}`);
 }
 
 async function cmdStart(): Promise<void> {
-  await ensureTools();
-  await ensureSignedIn();
-  let cfg = await ensureFreshToken(loadConfig());
-  await api.register(cfg, `${os.platform()}-${os.arch()}`, os.hostname());
-  console.log(`Helper online as ${cfg.email ?? cfg.deviceId}`);
-  console.log("Leave this running. Clip from the web app or phone — this machine downloads YouTube.");
-  console.log("Ctrl+C to stop.");
-  let lastHeartbeat = 0;
   for (;;) {
-    cfg = await ensureFreshToken(cfg);
-    const now = Date.now();
-    if (now - lastHeartbeat >= 15_000) {
-      await api.heartbeat(cfg).catch((err: Error) => {
-        console.warn(`heartbeat failed: ${err.message}`);
+    const session = await restoreSession();
+    if (!session) await cmdLogin();
+    await new Promise<void>((resolve) => {
+      const stop = startHelperLoop((snap) => {
+        console.log(snap.message);
+        if (snap.status === "signed_out") {
+          stop();
+          resolve();
+        }
       });
-      lastHeartbeat = now;
-    }
-    let claim: api.ClaimedJob | null = null;
-    try {
-      claim = await api.claimJob(cfg);
-    } catch (err) {
-      console.warn(`claim failed: ${err instanceof Error ? err.message : err}`);
-    }
-    if (claim) {
-      console.log(`\nClaimed ${claim.jobId}`);
-      console.log(`  ${claim.youtubeUrl}`);
-      try {
-        await fulfillRemoteJob(cfg, claim);
-      } catch (err) {
-        console.error(`Job ${claim.jobId} failed: ${err instanceof Error ? err.message : err}`);
-      }
-      lastHeartbeat = 0;
-      continue;
-    }
-    await new Promise((r) => setTimeout(r, 3_000));
+    });
   }
 }
 
 async function cmdSetup(): Promise<void> {
   console.log("");
   console.log("Encylipedia Helper");
-  console.log("This computer will download YouTube so you can clip from anywhere.");
+  console.log("Prefer the desktop app: pnpm app   (or the downloaded Helper.app)");
   console.log("");
-  console.log("Setting up…");
   await ensureTools();
-  await ensureSignedIn();
+  const session = await restoreSession();
+  if (!session) await cmdLogin();
   try {
     await installBackgroundService();
-    console.log("");
     console.log("Helper is running in the background and will start when you log in.");
-    console.log("You can close this window. Clip from https://app.encyclipedia.ai/clipper");
-    console.log("");
+    console.log("Clip from https://app.encyclipedia.ai/clipper");
   } catch (err) {
     console.warn(
       `Could not install a background service (${err instanceof Error ? err.message : err}).`,
     );
-    console.log("Starting in this window instead. Leave it open.");
     try {
       spawnForegroundDetached();
       console.log("Helper is running. You can close this window.");
@@ -194,15 +129,20 @@ switch (cmd) {
     await cmdLogin();
     break;
   case "logout":
-    clearSession(loadConfig());
+    signOut();
     console.log("Signed out.");
     break;
-  case "whoami":
-    await cmdWhoami();
+  case "clip": {
+    const url = rest.find((a) => !a.startsWith("--"));
+    if (!url) usage();
+    let length: "short" | "medium" = "short";
+    const li = rest.indexOf("--length");
+    if (li >= 0 && rest[li + 1] === "medium") length = "medium";
+    await clipFromUrl(url, length, (update) =>
+      console.log(typeof update === "string" ? update : update.detail ?? ""),
+    );
     break;
-  case "clip":
-    await cmdClip(rest);
-    break;
+  }
   case "start":
     await cmdStart();
     break;
@@ -212,7 +152,7 @@ switch (cmd) {
     break;
   case "uninstall":
     uninstallBackgroundService();
-    console.log("Background helper removed. Run encyclipedia-agent to set it up again.");
+    console.log("Background helper removed.");
     break;
   default:
     usage();

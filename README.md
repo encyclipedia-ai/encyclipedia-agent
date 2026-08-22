@@ -1,49 +1,39 @@
 # Encylipedia Helper
 
-Install this **once** on a computer at home or in the studio. Then clip
-from the web app or your phone. This machine downloads YouTube; encyclipedia
-does the rest in the cloud.
-
-You do **not** need Node, Homebrew, or yt-dlp. The installer sets those up.
+A small app you install on a computer at home or in the studio.
+Leave it open. It shows that it is running, and you can paste a YouTube
+URL to clip. Jobs from the web app or your phone also run on this machine.
 
 ## Install
 
-**Mac or Linux** — paste this in Terminal:
+Download the app for your computer from the latest release:
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/encyclipedia-ai/encyclipedia-agent/main/install.sh | bash
-```
+**https://github.com/encyclipedia-ai/encyclipedia-agent/releases/latest**
 
-**Windows** — paste this in PowerShell:
+- Mac: `Encylipedia Helper.dmg`
+- Windows: `Encylipedia Helper Setup.exe`
+- Linux: `.AppImage`
 
-```powershell
-irm https://raw.githubusercontent.com/encyclipedia-ai/encyclipedia-agent/main/install.ps1 | iex
-```
+Open it, sign in with the same email you use at
+[app.encyclipedia.ai](https://app.encyclipedia.ai), and leave the window open.
 
-Sign in with the same email you use at [app.encyclipedia.ai](https://app.encyclipedia.ai).
-The helper then runs in the background and starts when you log in.
-
-That is the whole setup. Clip from https://app.encyclipedia.ai/clipper
-
-## Commands (optional)
-
-| Command | What it does |
-| --- | --- |
-| `encyclipedia-agent` | Sign in (if needed) and run in the background |
-| `encyclipedia-agent stop` | Stop the background helper |
-| `encyclipedia-agent logout` | Sign out |
-| `encyclipedia-agent uninstall` | Remove the login-item / startup task |
-
-Power users: `start` (foreground), `clip <url>`.
+That is the whole setup.
 
 ## Developers
 
 ```bash
-export ENCYCLIPEDIA_API_URL=http://localhost:3001
-export FIREBASE_AUTH_EMULATOR_HOST=localhost:9099
 pnpm install
-pnpm dev
+pnpm app          # desktop window
+pnpm dev          # CLI
 ```
 
-Prebuilt binaries are published from `.github/workflows/release.yml` on
-`agent-v*` tags. Config lives at `~/.encyclipedia/agent.json`.
+```bash
+export ENCYCLIPEDIA_API_URL=http://localhost:3001
+export FIREBASE_AUTH_EMULATOR_HOST=localhost:9099
+pnpm app
+```
+
+Package locally: `pnpm dist:mac` / `pnpm dist:win` / `pnpm dist:linux`.
+
+Releases are built by `.github/workflows/release.yml` on `agent-v*` tags.
+Config lives at `~/.encyclipedia/agent.json`.

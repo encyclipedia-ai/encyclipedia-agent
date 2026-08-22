@@ -1,15 +1,17 @@
 {
   "name": "@encyclipedia-ai/agent",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "Encylipedia Helper: install on a customer computer so YouTube downloads happen on their network, then cloud workers render clips.",
+  "description": "Encylipedia Helper desktop app: download YouTube on the customer's computer.",
   "license": "UNLICENSED",
   "type": "module",
+  "main": "./dist/electron-main.js",
   "bin": {
     "encyclipedia-agent": "./dist/index.js"
   },
   "files": [
     "dist",
+    "ui",
     "install.sh",
     "install.ps1"
   ],
@@ -17,14 +19,52 @@
     "build": "tsc -p tsconfig.json",
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js",
+    "app": "tsc -p tsconfig.json && electron .",
+    "dist:mac": "tsc -p tsconfig.json && electron-builder --mac",
+    "dist:win": "tsc -p tsconfig.json && electron-builder --win",
+    "dist:linux": "tsc -p tsconfig.json && electron-builder --linux",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "engines": {
     "node": ">=20"
   },
+  "build": {
+    "appId": "ai.encyclipedia.helper",
+    "productName": "Encylipedia Helper",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "ui/**/*"
+    ],
+    "mac": {
+      "category": "public.app-category.video",
+      "target": [
+        "dmg"
+      ],
+      "identity": null
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Video"
+    }
+  },
   "devDependencies": {
     "@types/node": "^22.10.2",
+    "electron": "^35.2.1",
+    "electron-builder": "^26.0.12",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["electron", "electron-winstaller", "esbuild"]
   }
 }
