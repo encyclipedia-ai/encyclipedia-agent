@@ -22,6 +22,28 @@ export interface VideoInfo {
   channelAvatar: string | null;
 }
 
+export interface TranscriptSegment {
+  start: number;
+  end: number;
+  text: string;
+}
+
+export interface ClipPlanItem {
+  title: string;
+  summary: string;
+  startSec: number;
+  endSec: number;
+  durationSec: number;
+  viralScore: number;
+  transcript: string;
+  publishHashtags?: string;
+}
+
+export interface ClipPlan {
+  clips: ClipPlanItem[];
+  costUsd: number;
+}
+
 export interface UploadTarget {
   bucket: string;
   objectKey: string;
@@ -103,6 +125,40 @@ export function requestUploadUrl(
   });
 }
 
+export function analyze(
+  cfg: AgentConfig,
+  body: {
+    segments: TranscriptSegment[];
+    clipLength: "short" | "medium";
+    video: VideoInfo;
+    videoTitle?: string;
+  },
+) {
+  return request<ClipPlan>(cfg, "/api/agent/analyze", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function analyzeJob(
+  cfg: AgentConfig,
+  jobId: string,
+  body: {
+    segments: TranscriptSegment[];
+    clipLength: "short" | "medium";
+    videoTitle?: string;
+  },
+) {
+  return request<ClipPlan>(
+    cfg,
+    `/api/agent/jobs/${encodeURIComponent(jobId)}/analyze`,
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+    },
+  );
+}
+
 export function submitJob(
   cfg: AgentConfig,
   body: {
@@ -110,6 +166,7 @@ export function submitJob(
     clipLength: "short" | "medium";
     video: VideoInfo;
     source: { bucket: string; objectKey: string; subtitleKey?: string };
+    clipPlan?: ClipPlan;
   },
 ) {
   return request<{ jobId: string; status: string; deduped?: boolean }>(
@@ -154,6 +211,7 @@ export function completeJob(
   body: {
     video?: VideoInfo;
     source: { bucket: string; objectKey: string; subtitleKey?: string };
+    clipPlan?: ClipPlan;
   },
 ) {
   return request<{ jobId: string; status: string }>(

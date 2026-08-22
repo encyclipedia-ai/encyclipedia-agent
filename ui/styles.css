@@ -416,6 +416,10 @@ button.ghost:hover:not(:disabled) {
   color: var(--bad);
 }
 
+.queue-item.phase-analyze .queue-phase {
+  color: var(--bronze-strong);
+}
+
 .queue-item.phase-done .queue-phase {
   color: var(--ok);
 }
