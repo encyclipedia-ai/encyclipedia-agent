@@ -67,7 +67,12 @@ function renderQueue(items) {
     if (item.source === "remote") {
       const src = document.createElement("span");
       src.className = "queue-source";
-      src.textContent = item.kind === "recut" ? "Clip edit" : "From the web";
+      const recut =
+        item.kind === "recut" ||
+        (Number.isFinite(Number(item.startSec)) &&
+          Number.isFinite(Number(item.durationSec)) &&
+          Number(item.durationSec) > 0);
+      src.textContent = recut ? "Clip edit" : "From the web";
       meta.append(src);
     }
     const detail = document.createElement("p");

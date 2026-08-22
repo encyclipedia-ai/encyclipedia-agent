@@ -6,6 +6,7 @@ import * as api from "./api.js";
 import { AgentApiError } from "./api.js";
 import type { QueuePatch } from "./job-queue.js";
 import { putFile } from "./upload.js";
+import { isRecutClaim, RECUT_NOT_FULL_VOD, RECUT_WINDOW_MISSING } from "./claim.js";
 import { downloadSection, downloadSource, dumpVideoInfo, sweepDownloadTemps } from "./ytdlp.js";
 
 const TERMINAL = new Set(["done", "error", "cancelled"]);
@@ -154,6 +155,10 @@ export async function handoffRemoteJob(
   claim: api.ClaimedJob,
   onLog?: LogFn,
 ): Promise<string> {
+  if (isRecutClaim(claim)) {
+    await api.failJob(cfg, claim.jobId, RECUT_NOT_FULL_VOD).catch(() => {});
+    throw new Error(RECUT_NOT_FULL_VOD);
+  }
   try {
     const { video, source } = await ingestSource(cfg, claim.youtubeUrl, onLog);
     say(onLog, "Handing off to cloud render…", { phase: "upload", percent: 100 });
@@ -176,7 +181,8 @@ export async function handoffRecut(
   const startSec = Number(claim.startSec);
   const durationSec = Number(claim.durationSec);
   if (!Number.isFinite(startSec) || !Number.isFinite(durationSec) || durationSec <= 0) {
-    throw new Error("Recut job is missing a valid time window.");
+    await api.failJob(cfg, claim.jobId, RECUT_WINDOW_MISSING).catch(() => {});
+    throw new Error(RECUT_WINDOW_MISSING);
   }
   try {
     if (claim.title) say(onLog, claim.title, { title: claim.title });

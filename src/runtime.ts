@@ -2,6 +2,7 @@ import os from "node:os";
 import { clearSession, loadConfig, saveConfig, type AgentConfig } from "./config.js";
 import { ensureFreshToken, signInWithIdp, signInWithPassword } from "./auth.js";
 import * as api from "./api.js";
+import { isRecutClaim } from "./claim.js";
 import {
   handoffLocalClip,
   handoffRecut,
@@ -195,10 +196,9 @@ export function startHelperLoop(onUpdate: HelperListener): () => void {
         durationSec: item.durationSec,
         title: item.title ?? undefined,
       };
-      cloudJobId =
-        item.kind === "recut"
-          ? await handoffRecut(authed, claim, onLog)
-          : await handoffRemoteJob(authed, claim, onLog);
+      cloudJobId = isRecutClaim(claim)
+        ? await handoffRecut(authed, claim, onLog)
+        : await handoffRemoteJob(authed, claim, onLog);
     } else {
       cloudJobId = await handoffLocalClip(authed, item.url, item.clipLength, onLog);
     }

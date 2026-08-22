@@ -1,3 +1,5 @@
+import { isRecutClaim } from "./claim.js";
+
 export type WorkPhase =
   | "queued"
   | "lookup"
@@ -147,7 +149,7 @@ export function enqueueRemote(claim: {
     clipLength: claim.clipLength,
     source: "remote",
     remoteJobId: claim.jobId,
-    kind: claim.kind === "recut" ? "recut" : "process",
+    kind: isRecutClaim(claim) ? "recut" : "process",
     startSec: claim.startSec,
     durationSec: claim.durationSec,
     title: claim.title ?? null,

@@ -143,7 +143,7 @@ export interface ClaimedJob {
 export async function claimJob(cfg: AgentConfig): Promise<ClaimedJob | null> {
   const result = await request<ClaimedJob | undefined>(cfg, "/api/agent/jobs/claim", {
     method: "POST",
-    body: JSON.stringify({ deviceId: cfg.deviceId }),
+    body: JSON.stringify({ deviceId: cfg.deviceId, supportsRecut: true }),
   });
   return result ?? null;
 }
