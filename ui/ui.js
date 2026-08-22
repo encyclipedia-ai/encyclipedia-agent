@@ -21,6 +21,7 @@ const PHASE_LABEL = {
   queued: "In line",
   lookup: "Looking up",
   download: "Downloading",
+  analyze: "Scanning",
   upload: "Uploading",
   render: "Rendering",
   done: "Shelved",
@@ -42,12 +43,13 @@ function renderQueue(items) {
   const list = Array.isArray(items) ? items.slice() : [];
   const rank = {
     download: 0,
-    upload: 1,
-    lookup: 2,
-    queued: 3,
-    render: 4,
-    error: 5,
-    done: 6,
+    analyze: 1,
+    upload: 2,
+    lookup: 3,
+    queued: 4,
+    render: 5,
+    error: 6,
+    done: 7,
   };
   list.sort((a, b) => (rank[a.phase] ?? 9) - (rank[b.phase] ?? 9) || a.addedAt - b.addedAt);
   queueEl.replaceChildren();
@@ -67,7 +69,12 @@ function renderQueue(items) {
     if (item.source === "remote") {
       const src = document.createElement("span");
       src.className = "queue-source";
-      src.textContent = item.kind === "recut" ? "Clip edit" : "From the web";
+      const recut =
+        item.kind === "recut" ||
+        (Number.isFinite(Number(item.startSec)) &&
+          Number.isFinite(Number(item.durationSec)) &&
+          Number(item.durationSec) > 0);
+      src.textContent = recut ? "Clip edit" : "From the web";
       meta.append(src);
     }
     const detail = document.createElement("p");

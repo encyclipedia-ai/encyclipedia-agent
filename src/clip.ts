@@ -4,8 +4,10 @@ import path from "node:path";
 import type { AgentConfig } from "./config.js";
 import * as api from "./api.js";
 import { AgentApiError } from "./api.js";
+import { parseJson3Captions } from "./captions.js";
 import type { QueuePatch } from "./job-queue.js";
 import { putFile } from "./upload.js";
+import { isRecutClaim, RECUT_NOT_FULL_VOD, RECUT_WINDOW_MISSING } from "./claim.js";
 import { downloadSection, downloadSource, dumpVideoInfo, sweepDownloadTemps } from "./ytdlp.js";
 
 const TERMINAL = new Set(["done", "error", "cancelled"]);
@@ -33,9 +35,11 @@ export async function ingestSource(
   cfg: AgentConfig,
   url: string,
   onLog?: LogFn,
+  opts?: { clipLength: "short" | "medium"; jobId?: string },
 ): Promise<{
   video: api.VideoInfo;
   source: { bucket: string; objectKey: string; subtitleKey?: string };
+  clipPlan?: api.ClipPlan;
 }> {
   say(onLog, "Looking up the video…", { phase: "lookup", percent: null });
   const video = await dumpVideoInfo(url);
@@ -52,6 +56,9 @@ export async function ingestSource(
         detail: update.detail,
       });
     });
+    const clipPlan = opts
+      ? await analyzeAfterDownload(cfg, captionsPath, video, opts.clipLength, opts.jobId, onLog)
+      : undefined;
     say(onLog, "Uploading to encyclipedia…", { phase: "upload", percent: 0 });
     const videoTarget = await api.requestUploadUrl(cfg, video.id, "video", "video/mp4");
     await putFile(videoTarget, videoPath, (percent, sent, total) => {
@@ -93,10 +100,60 @@ export async function ingestSource(
         objectKey: videoTarget.objectKey,
         subtitleKey,
       },
+      clipPlan,
     };
   } finally {
     await fs.rm(workDir, { recursive: true, force: true }).catch(() => {});
   }
+}
+
+async function analyzeAfterDownload(
+  cfg: AgentConfig,
+  captionsPath: string | null,
+  video: api.VideoInfo,
+  clipLength: "short" | "medium",
+  jobId: string | undefined,
+  onLog?: LogFn,
+): Promise<api.ClipPlan | undefined> {
+  if (!captionsPath) {
+    say(onLog, "No captions on this video. Cloud will scan after upload.");
+    return undefined;
+  }
+  let segments;
+  try {
+    const raw = await fs.readFile(captionsPath, "utf8");
+    segments = parseJson3Captions(raw);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    say(onLog, `Captions could not be parsed (${message}). Cloud will scan after upload.`);
+    return undefined;
+  }
+  if (segments.length === 0) {
+    say(onLog, "Captions were empty. Cloud will scan after upload.");
+    return undefined;
+  }
+
+  say(onLog, "Scanning for viral moments…", { phase: "analyze", percent: null });
+  const plan = jobId
+    ? await api.analyzeJob(cfg, jobId, {
+        segments,
+        clipLength,
+        videoTitle: video.title,
+      })
+    : await api.analyze(cfg, {
+        segments,
+        clipLength,
+        video,
+        videoTitle: video.title,
+      });
+  say(
+    onLog,
+    plan.clips.length === 1
+      ? "Found 1 viral moment"
+      : `Found ${plan.clips.length} viral moments`,
+    { phase: "analyze" },
+  );
+  return plan;
 }
 
 export async function waitForWorker(
@@ -131,13 +188,14 @@ export async function handoffLocalClip(
   clipLength: "short" | "medium",
   onLog?: LogFn,
 ): Promise<string> {
-  const { video, source } = await ingestSource(cfg, url, onLog);
+  const { video, source, clipPlan } = await ingestSource(cfg, url, onLog, { clipLength });
   say(onLog, "Submitting…", { phase: "upload", percent: 100 });
   const submitted = await api.submitJob(cfg, {
     url,
     clipLength,
     video,
     source,
+    clipPlan,
   });
   say(
     onLog,
@@ -154,10 +212,17 @@ export async function handoffRemoteJob(
   claim: api.ClaimedJob,
   onLog?: LogFn,
 ): Promise<string> {
+  if (isRecutClaim(claim)) {
+    await api.failJob(cfg, claim.jobId, RECUT_NOT_FULL_VOD).catch(() => {});
+    throw new Error(RECUT_NOT_FULL_VOD);
+  }
   try {
-    const { video, source } = await ingestSource(cfg, claim.youtubeUrl, onLog);
+    const { video, source, clipPlan } = await ingestSource(cfg, claim.youtubeUrl, onLog, {
+      clipLength: claim.clipLength,
+      jobId: claim.jobId,
+    });
     say(onLog, "Handing off to cloud render…", { phase: "upload", percent: 100 });
-    await api.completeJob(cfg, claim.jobId, { video, source });
+    await api.completeJob(cfg, claim.jobId, { video, source, clipPlan });
     return claim.jobId;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -176,7 +241,8 @@ export async function handoffRecut(
   const startSec = Number(claim.startSec);
   const durationSec = Number(claim.durationSec);
   if (!Number.isFinite(startSec) || !Number.isFinite(durationSec) || durationSec <= 0) {
-    throw new Error("Recut job is missing a valid time window.");
+    await api.failJob(cfg, claim.jobId, RECUT_WINDOW_MISSING).catch(() => {});
+    throw new Error(RECUT_WINDOW_MISSING);
   }
   try {
     if (claim.title) say(onLog, claim.title, { title: claim.title });

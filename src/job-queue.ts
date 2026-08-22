@@ -1,7 +1,10 @@
+import { isRecutClaim } from "./claim.js";
+
 export type WorkPhase =
   | "queued"
   | "lookup"
   | "download"
+  | "analyze"
   | "upload"
   | "render"
   | "done"
@@ -38,7 +41,7 @@ export type QueueProcessor = (
 ) => Promise<{ cloudJobId?: string } | void>;
 
 const KEEP_FINISHED = 15;
-const MACHINE_PHASES = new Set<WorkPhase>(["lookup", "download", "upload"]);
+const MACHINE_PHASES = new Set<WorkPhase>(["lookup", "download", "analyze", "upload"]);
 
 let items: QueueItem[] = [];
 let processor: QueueProcessor | null = null;
@@ -147,7 +150,7 @@ export function enqueueRemote(claim: {
     clipLength: claim.clipLength,
     source: "remote",
     remoteJobId: claim.jobId,
-    kind: claim.kind === "recut" ? "recut" : "process",
+    kind: isRecutClaim(claim) ? "recut" : "process",
     startSec: claim.startSec,
     durationSec: claim.durationSec,
     title: claim.title ?? null,
