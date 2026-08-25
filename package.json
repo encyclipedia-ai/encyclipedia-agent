@@ -4,7 +4,7 @@
   "private": true,
   "description": "Encyclipedia Librarian desktop app: securely download source media on the customer's computer.",
   "license": "UNLICENSED",
-  "type": "module",
+  "type": "commonjs",
   "main": "./dist/electron-main.js",
   "bin": {
     "encyclipedia-agent": "./dist/index.js"
@@ -31,7 +31,7 @@
   },
   "build": {
     "appId": "ai.encyclipedia.helper",
-    "productName": "Encyclipedia Librarian",
+    "productName": "Encyclipedia - Librarian",
     "executableName": "encyclipedia-librarian",
     "directories": {
       "output": "release"
@@ -52,14 +52,18 @@
     ],
     "mac": {
       "category": "public.app-category.video",
-      "icon": "build/generated/icons/icon.icns",
+      "icon": "build/generated/icons/mac/icon.icns",
+      "extendInfo": {
+        "CFBundleDisplayName": "Encyclipedia - Librarian",
+        "CFBundleName": "Encyclipedia - Librarian"
+      },
       "target": [
         "dmg",
         "zip"
       ]
     },
     "win": {
-      "icon": "build/generated/icons/icon.ico",
+      "icon": "build/generated/icons/win/icon.ico",
       "target": [
         "nsis"
       ]

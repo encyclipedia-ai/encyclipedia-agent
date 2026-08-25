@@ -1,6 +1,5 @@
-import { app, BrowserWindow, ipcMain, session } from "electron";
+import { app, BrowserWindow, ipcMain, nativeImage, session } from "electron";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import {
   createGoogleAuthSession,
   isOAuthReturnUrl,
@@ -21,12 +20,12 @@ import {
   type UpdaterController,
 } from "./updater.js";
 
-const here = path.dirname(fileURLToPath(import.meta.url));
+const here = __dirname;
 const ui = (...parts: string[]) => path.join(here, "..", "ui", ...parts);
 const brandAsset = (...parts: string[]) =>
   path.join(here, "..", "build", ...parts);
 
-app.setName("Encyclipedia Librarian");
+app.setName("Encyclipedia - Librarian");
 
 let win: BrowserWindow | null = null;
 let stopLoop: (() => void) | null = null;
@@ -289,6 +288,9 @@ ipcMain.handle(
 );
 
 app.whenReady().then(async () => {
+  if (process.platform === "darwin") {
+    app.dock?.setIcon(nativeImage.createFromPath(brandAsset("icon.png")));
+  }
   createWindow();
   const sessionCfg = await restoreSession();
   if (sessionCfg) beginLoop();
