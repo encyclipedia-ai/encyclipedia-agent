@@ -51,6 +51,14 @@ the stable device ID are stored with mode `0600` in
 tokens are refreshed automatically, and an unauthorized API response forces
 one token refresh before failing.
 
+## Automatic updates
+
+Packaged apps check stable GitHub Releases automatically and download updates
+in the background. Librarian installs and relaunches only when its queue has no
+queued, local, or renderer-waiting jobs and no sign-in window is open. Completed
+and failed jobs do not block an update. Development sessions do not contact the
+release feed.
+
 ## Browser cookies
 
 Downloads first try without browser cookies. If YouTube requires login or
@@ -123,10 +131,13 @@ pnpm dist:linux
 GitHub release for `agent-v*` tags:
 
 ```bash
-git tag agent-v0.3.1
-git push origin agent-v0.3.1
+git tag agent-v0.4.0
+git push origin agent-v0.4.0
 ```
 
-Manual workflow dispatch publishes an `agent-nightly-<run-id>` release. The
-current workflow disables automatic macOS signing; signing/notarization must
-be added before claiming a trusted production installer.
+The tag must match `package.json`. Manual workflow dispatch publishes a
+prerelease `agent-nightly-<run-id>` and does not replace the stable update feed.
+Apple and Windows certificate secrets are optional, so CI still produces
+unsigned installers until credentials are configured. Reliable production
+macOS auto-updates should be signed and notarized; Windows Authenticode signing
+avoids trust warnings.
