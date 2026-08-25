@@ -47,28 +47,12 @@ header {
   margin-bottom: 18px;
 }
 
-.crest {
-  width: 2.5rem;
-  height: 2.5rem;
+.app-logo {
+  width: 3rem;
+  height: 3rem;
   flex-shrink: 0;
-  display: grid;
-  place-items: center;
-  border-radius: 2px;
-  font-family: var(--font-serif);
-  font-weight: 700;
-  font-size: 1.25rem;
-  color: var(--accent-contrast);
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--bronze) 80%, white) 0%,
-    var(--bronze) 55%,
-    var(--bronze-strong) 100%
-  );
-  border: 1px solid var(--bronze-strong);
-  box-shadow:
-    inset 0 1px 0 color-mix(in srgb, white 35%, transparent),
-    inset 0 -1px 0 color-mix(in srgb, black 25%, transparent),
-    0 1px 2px rgba(0, 0, 0, 0.25);
+  display: block;
+  border-radius: 12px;
 }
 
 h1 {

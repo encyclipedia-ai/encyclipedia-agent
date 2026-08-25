@@ -118,42 +118,49 @@ async function cmdSetup(): Promise<void> {
   }
 }
 
-const [cmd, ...rest] = process.argv.slice(2);
-switch (cmd) {
-  case undefined:
-  case "":
-  case "setup":
-    await cmdSetup();
-    break;
-  case "login":
-    await cmdLogin();
-    break;
-  case "logout":
-    signOut();
-    console.log("Signed out.");
-    break;
-  case "clip": {
-    const url = rest.find((a) => !a.startsWith("--"));
-    if (!url) usage();
-    let length: "short" | "medium" = "short";
-    const li = rest.indexOf("--length");
-    if (li >= 0 && rest[li + 1] === "medium") length = "medium";
-    await clipFromUrl(url, length, (update) =>
-      console.log(typeof update === "string" ? update : update.detail ?? ""),
-    );
-    break;
+async function main(): Promise<void> {
+  const [cmd, ...rest] = process.argv.slice(2);
+  switch (cmd) {
+    case undefined:
+    case "":
+    case "setup":
+      await cmdSetup();
+      break;
+    case "login":
+      await cmdLogin();
+      break;
+    case "logout":
+      signOut();
+      console.log("Signed out.");
+      break;
+    case "clip": {
+      const url = rest.find((a) => !a.startsWith("--"));
+      if (!url) usage();
+      let length: "short" | "medium" = "short";
+      const li = rest.indexOf("--length");
+      if (li >= 0 && rest[li + 1] === "medium") length = "medium";
+      await clipFromUrl(url, length, (update) =>
+        console.log(typeof update === "string" ? update : update.detail ?? ""),
+      );
+      break;
+    }
+    case "start":
+      await cmdStart();
+      break;
+    case "stop":
+      stopBackgroundService();
+      console.log("Librarian stopped.");
+      break;
+    case "uninstall":
+      uninstallBackgroundService();
+      console.log("Background Librarian removed.");
+      break;
+    default:
+      usage();
   }
-  case "start":
-    await cmdStart();
-    break;
-  case "stop":
-    stopBackgroundService();
-    console.log("Librarian stopped.");
-    break;
-  case "uninstall":
-    uninstallBackgroundService();
-    console.log("Background Librarian removed.");
-    break;
-  default:
-    usage();
 }
+
+void main().catch((error: unknown) => {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exitCode = 1;
+});
