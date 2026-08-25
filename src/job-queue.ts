@@ -187,7 +187,7 @@ async function drain(): Promise<void> {
             cloudJobId: result.cloudJobId,
             phase: "render",
             percent: null,
-            detail: "Cloud is rendering clips…",
+            detail: "Renderer is preparing clips…",
           });
         } else {
           updateQueueItem(next.id, {

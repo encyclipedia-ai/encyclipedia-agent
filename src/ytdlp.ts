@@ -15,7 +15,15 @@ import {
 
 class YoutubeBlockedError extends Error {
   constructor() {
-    super("YouTube refused the download. Wait a moment and try again.");
+    super("YouTube refused the Librarian's download. Wait a moment and try again.");
+  }
+}
+
+class YoutubeAuthRequiredError extends Error {
+  constructor() {
+    super(
+      "YouTube asked the Librarian to confirm a browser login. Sign into YouTube in Chrome, Safari, Edge, Brave, or Firefox, then try again.",
+    );
   }
 }
 
@@ -58,6 +66,13 @@ type RunOpts = {
   cookiesFromBrowser?: string;
 };
 
+interface CookieSource {
+  spec: string;
+  label: string;
+}
+
+let preferredCookieSource: CookieSource | null = null;
+
 function parseDownloadProgress(text: string): {
   percent: number;
   speed?: string;
@@ -74,14 +89,94 @@ function parseDownloadProgress(text: string): {
   };
 }
 
-function cookieBrowsers(): string[] {
+function chromiumProfiles(browser: string, root: string): CookieSource[] {
+  if (!fs.existsSync(root)) return [];
+  let names: string[] = [];
+  try {
+    names = fs.readdirSync(root);
+  } catch {
+    return [];
+  }
+  return names
+    .filter((name) => name === "Default" || /^Profile \d+$/.test(name))
+    .filter((name) => {
+      const profile = path.join(root, name);
+      return (
+        fs.existsSync(path.join(profile, "Cookies")) ||
+        fs.existsSync(path.join(profile, "Network", "Cookies"))
+      );
+    })
+    .map((name) => ({
+      spec: `${browser}:${name}`,
+      label: `${browser} ${name}`,
+    }));
+}
+
+function cookieSources(): CookieSource[] {
+  const home = os.homedir();
+  const sources: CookieSource[] = [];
   if (process.platform === "darwin") {
-    return ["chrome", "safari", "edge", "brave", "firefox"];
+    const appSupport = path.join(home, "Library", "Application Support");
+    sources.push(
+      ...chromiumProfiles("chrome", path.join(appSupport, "Google", "Chrome")),
+      ...chromiumProfiles("edge", path.join(appSupport, "Microsoft Edge")),
+      ...chromiumProfiles("brave", path.join(appSupport, "BraveSoftware", "Brave-Browser")),
+    );
+    if (
+      fs.existsSync(path.join(home, "Library", "Cookies", "Cookies.binarycookies")) ||
+      fs.existsSync(
+        path.join(
+          home,
+          "Library",
+          "Containers",
+          "com.apple.Safari",
+          "Data",
+          "Library",
+          "Cookies",
+          "Cookies.binarycookies",
+        ),
+      )
+    ) {
+      sources.push({ spec: "safari", label: "safari" });
+    }
+    if (fs.existsSync(path.join(appSupport, "Firefox", "Profiles"))) {
+      sources.push({ spec: "firefox", label: "firefox" });
+    }
+  } else if (process.platform === "win32") {
+    const local = process.env.LOCALAPPDATA ?? path.join(home, "AppData", "Local");
+    sources.push(
+      ...chromiumProfiles("chrome", path.join(local, "Google", "Chrome", "User Data")),
+      ...chromiumProfiles("edge", path.join(local, "Microsoft", "Edge", "User Data")),
+      ...chromiumProfiles(
+        "brave",
+        path.join(local, "BraveSoftware", "Brave-Browser", "User Data"),
+      ),
+    );
+    const roaming = process.env.APPDATA;
+    if (roaming && fs.existsSync(path.join(roaming, "Mozilla", "Firefox", "Profiles"))) {
+      sources.push({ spec: "firefox", label: "firefox" });
+    }
+  } else {
+    const config = path.join(home, ".config");
+    sources.push(
+      ...chromiumProfiles("chrome", path.join(config, "google-chrome")),
+      ...chromiumProfiles("chromium", path.join(config, "chromium")),
+      ...chromiumProfiles("brave", path.join(config, "BraveSoftware", "Brave-Browser")),
+    );
+    if (fs.existsSync(path.join(home, ".mozilla", "firefox"))) {
+      sources.push({ spec: "firefox", label: "firefox" });
+    }
   }
-  if (process.platform === "win32") {
-    return ["chrome", "edge", "brave", "firefox"];
-  }
-  return ["chrome", "chromium", "firefox", "brave"];
+
+  const ordered = preferredCookieSource
+    ? [preferredCookieSource, ...sources]
+    : sources;
+  const seen = new Set<string>();
+  return ordered.filter((source) => {
+    if (seen.has(source.spec)) return false;
+    seen.add(source.spec);
+    return true;
+  });
 }
 
 function looksLikeCookieFailure(err: unknown): boolean {
@@ -125,7 +220,7 @@ function spawnYtdlp(
           for (const raw of lines) {
             const line = raw.trim();
             if (!line) continue;
-            if (!fromStdout) process.stderr.write(`  ${line}\n`);
+            if (!fromStdout) process.stderr.write(`  [Librarian/YouTube] ${line}\n`);
             if (!opts.onProgress) continue;
             const parsed = parseDownloadProgress(line);
             if (parsed) {
@@ -170,6 +265,14 @@ function spawnYtdlp(
             reject(new AgeRestrictedError());
             return;
           }
+          if (
+            /sign in to confirm you(?:'|’)re not a bot|use --cookies-from-browser|use --cookies for the authentication|login required/i.test(
+              haystack,
+            )
+          ) {
+            reject(new YoutubeAuthRequiredError());
+            return;
+          }
           if (/The page needs to be reloaded/i.test(haystack)) {
             reject(new FormatUnavailableError(detail));
             return;
@@ -198,36 +301,68 @@ async function run(
   return withDownloaderLock(async () => {
     const tryOnce = (extra: RunOpts = {}) => spawnYtdlp(argv, { ...opts, ...extra });
 
-    const retryAgeGate = async (): Promise<{ stdout: string; stderr: string }> => {
+    const retryWithBrowserLogin = async (): Promise<{ stdout: string; stderr: string }> => {
       opts.onProgress?.({
         percent: null,
-        detail: "Age-restricted video; using your YouTube browser login…",
+        detail: "YouTube requested a sign-in check. Librarian is trying browser logins…",
       });
-      for (const browser of cookieBrowsers()) {
+      const sources = cookieSources();
+      for (const source of sources) {
         try {
-          process.stderr.write(`  Age-restricted; trying ${browser} cookies…\n`);
-          return await tryOnce({ cookiesFromBrowser: browser });
+          process.stderr.write(
+            `  [Librarian/YouTube] trying ${source.label} browser cookies…\n`,
+          );
+          const result = await tryOnce({ cookiesFromBrowser: source.spec });
+          preferredCookieSource = source;
+          process.stderr.write(
+            `  [Librarian/YouTube] ${source.label} browser login accepted.\n`,
+          );
+          return result;
         } catch (retryErr) {
-          if (retryErr instanceof AgeRestrictedError || looksLikeCookieFailure(retryErr)) {
+          if (
+            retryErr instanceof AgeRestrictedError ||
+            retryErr instanceof YoutubeAuthRequiredError ||
+            retryErr instanceof YoutubeBlockedError ||
+            looksLikeCookieFailure(retryErr)
+          ) {
             continue;
           }
           throw retryErr;
         }
       }
+      if (sources.length === 0) {
+        process.stderr.write(
+          "  [Librarian/YouTube] no supported signed-in browser profiles were found.\n",
+        );
+      }
       opts.onProgress?.({
         percent: null,
-        detail: "Retrying with an embedded player…",
+        detail: "Browser login was unavailable. Librarian is trying an embedded player…",
       });
-      process.stderr.write("  Age-restricted; trying tv_embedded player…\n");
+      process.stderr.write(
+        "  [Librarian/YouTube] trying the embedded player without browser cookies…\n",
+      );
       return tryOnce({ extractorArgs: AGE_GATE_YT_EXTRACTOR });
     };
 
     try {
-      return await tryOnce();
+      return await tryOnce(
+        preferredCookieSource
+          ? { cookiesFromBrowser: preferredCookieSource.spec }
+          : {},
+      );
     } catch (err) {
-      if (err instanceof AgeRestrictedError) {
+      if (preferredCookieSource && looksLikeCookieFailure(err)) {
+        preferredCookieSource = null;
+        return retryWithBrowserLogin();
+      }
+      if (
+        err instanceof AgeRestrictedError ||
+        err instanceof YoutubeAuthRequiredError
+      ) {
         try {
-          return await retryAgeGate();
+          await refreshYtdlpIfNeeded({ force: true });
+          return await retryWithBrowserLogin();
         } catch {
           throw err;
         }
@@ -252,11 +387,15 @@ async function run(
           if (
             retryErr instanceof YoutubeBlockedError ||
             retryErr instanceof FormatUnavailableError ||
-            retryErr instanceof AgeRestrictedError
+            retryErr instanceof AgeRestrictedError ||
+            retryErr instanceof YoutubeAuthRequiredError
           ) {
-            if (retryErr instanceof AgeRestrictedError) {
+            if (
+              retryErr instanceof AgeRestrictedError ||
+              retryErr instanceof YoutubeAuthRequiredError
+            ) {
               try {
-                return await retryAgeGate();
+                return await retryWithBrowserLogin();
               } catch {
                 continue;
               }
