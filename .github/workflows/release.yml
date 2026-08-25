@@ -1,7 +1,9 @@
 name: Release Librarian
 
 # Builds Encyclipedia Librarian (desktop app) for Mac, Windows, and Linux.
-# Tag `agent-v0.3.0` (or run this workflow manually) to publish.
+# Tag `agent-v0.4.0` (or run this workflow manually) to publish.
+# Optional MAC_CERT_P12/MAC_CERT_PASSWORD/Apple and WINDOWS_CERT_P12/
+# WINDOWS_CERT_PASSWORD secrets enable signing; unsigned packages remain valid.
 
 on:
   push:
@@ -36,11 +38,23 @@ jobs:
         with:
           version: 10
 
+      - name: Verify release tag matches package version
+        if: github.ref_type == 'tag'
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: node scripts/verify-release-tag.cjs
+
       - name: Install and package
         env:
-          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          CSC_LINK: ${{ matrix.os == 'macos-latest' && secrets.MAC_CERT_P12 || matrix.os == 'windows-latest' && secrets.WINDOWS_CERT_P12 || '' }}
+          CSC_KEY_PASSWORD: ${{ matrix.os == 'macos-latest' && secrets.MAC_CERT_PASSWORD || matrix.os == 'windows-latest' && secrets.WINDOWS_CERT_PASSWORD || '' }}
+          CSC_IDENTITY_AUTO_DISCOVERY: ${{ (secrets.MAC_CERT_P12 != '' || secrets.WINDOWS_CERT_P12 != '') && 'true' || 'false' }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           pnpm install --frozen-lockfile
+          pnpm test
           pnpm ${{ matrix.script }}
 
       - name: Upload artifacts
@@ -53,6 +67,7 @@ jobs:
             release/*.AppImage
             release/*.zip
             release/*.blockmap
+            release/latest*.yml
 
   publish:
     needs: release
@@ -69,4 +84,6 @@ jobs:
           tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('agent-nightly-{0}', github.run_id) }}
           name: Encyclipedia Librarian ${{ github.ref_type == 'tag' && github.ref_name || 'nightly' }}
           generate_release_notes: true
+          prerelease: ${{ github.ref_type != 'tag' }}
+          make_latest: ${{ github.ref_type == 'tag' }}
           files: dist-out/**

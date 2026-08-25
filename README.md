@@ -21,6 +21,14 @@ Open it, sign in with the same email you use at
 The onboarding page detects the signed-in app automatically. Keep Librarian
 open whenever you submit or edit clips.
 
+## Automatic updates
+
+Packaged apps check GitHub Releases automatically and download updates in the
+background. Librarian installs and relaunches only when its queue contains no
+queued, local, or renderer-waiting jobs and no sign-in window is open. Completed
+and failed jobs do not block an update. Development sessions never contact the
+release feed.
+
 ## Developers
 
 ```bash
@@ -38,4 +46,8 @@ pnpm app
 Package locally: `pnpm dist:mac` / `pnpm dist:win` / `pnpm dist:linux`.
 
 Releases are built by `.github/workflows/release.yml` on `agent-v*` tags.
+The tag must match `package.json`. Apple and Windows certificate secrets are
+optional in CI, but production macOS auto-updates should be signed and notarized;
+Windows Authenticode signing avoids trust warnings. Manual workflow runs publish
+prerelease nightlies and do not replace the stable update feed.
 Config lives at `~/.encyclipedia/agent.json`.

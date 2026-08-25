@@ -124,6 +124,48 @@ h1 {
   border-radius: 3px 0 0 3px;
 }
 
+.update-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin: -2px 2px 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--surface) 70%, transparent);
+  font-size: 12px;
+}
+
+.update-status strong {
+  color: var(--ink);
+  font-family: var(--font-serif);
+  font-size: 11px;
+}
+
+.update-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.update-dot.update-current {
+  background: var(--ok);
+}
+
+.update-dot.update-downloading,
+.update-dot.update-waiting,
+.update-dot.update-installing,
+.update-dot.update-checking {
+  background: var(--warn);
+}
+
+.update-dot.update-failed {
+  background: var(--bad);
+}
+
 .card-title {
   margin: 0 0 12px;
   font-family: var(--font-serif);
