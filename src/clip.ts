@@ -116,7 +116,7 @@ async function analyzeAfterDownload(
   onLog?: LogFn,
 ): Promise<api.ClipPlan | undefined> {
   if (!captionsPath) {
-    say(onLog, "No captions on this video. Cloud will scan after upload.");
+    say(onLog, "No captions found. Librarian will upload the video for renderer analysis.");
     return undefined;
   }
   let segments;
@@ -125,11 +125,14 @@ async function analyzeAfterDownload(
     segments = parseJson3Captions(raw);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    say(onLog, `Captions could not be parsed (${message}). Cloud will scan after upload.`);
+    say(
+      onLog,
+      `Librarian could not parse the captions (${message}). The renderer will analyze after upload.`,
+    );
     return undefined;
   }
   if (segments.length === 0) {
-    say(onLog, "Captions were empty. Cloud will scan after upload.");
+    say(onLog, "Captions were empty. The renderer will analyze after upload.");
     return undefined;
   }
 
@@ -161,7 +164,7 @@ export async function waitForWorker(
   jobId: string,
   onLog?: LogFn,
 ): Promise<void> {
-  say(onLog, "Cloud is rendering clips…", { phase: "render", percent: null });
+  say(onLog, "Renderer is preparing clips…", { phase: "render", percent: null });
   while (true) {
     const job = await api.getJob(cfg, jobId);
     say(onLog, job.progress || job.status, { phase: "render" });
@@ -221,7 +224,7 @@ export async function handoffRemoteJob(
       clipLength: claim.clipLength,
       jobId: claim.jobId,
     });
-    say(onLog, "Handing off to cloud render…", { phase: "upload", percent: 100 });
+    say(onLog, "Handing off to the renderer…", { phase: "upload", percent: 100 });
     await api.completeJob(cfg, claim.jobId, { video, source, clipPlan });
     return claim.jobId;
   } catch (err) {
@@ -272,7 +275,7 @@ export async function handoffRecut(
           detail: `Uploading ${percent}% · ${formatBytes(sent)} of ${formatBytes(total)}`,
         });
       });
-      say(onLog, "Handing off to cloud recut…", { phase: "upload", percent: 100 });
+      say(onLog, "Handing the edit to the renderer…", { phase: "upload", percent: 100 });
       await api.completeJob(cfg, claim.jobId, {
         source: { bucket: target.bucket, objectKey: target.objectKey },
       });

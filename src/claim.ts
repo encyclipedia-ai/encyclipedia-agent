@@ -11,7 +11,7 @@ export function isRecutClaim(claim: {
 }
 
 export const RECUT_WINDOW_MISSING =
-  "This clip edit is missing a valid time window. Restart Encyclipedia Helper from current source (pnpm app) and try again.";
+  "This clip edit is missing a valid time window. Restart Librarian from current source (pnpm app) and try again.";
 
 export const RECUT_NOT_FULL_VOD =
-  "This job is a clip edit, not a full-video download. Restart Encyclipedia Helper from current source (pnpm app).";
+  "This job is a clip edit, not a full-video download. Restart Librarian from current source (pnpm app).";
