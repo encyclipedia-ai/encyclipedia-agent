@@ -104,9 +104,12 @@
         <button id="clip" type="submit">Clip this volume</button>
       </form>
       <section id="queue-wrap" class="queue-wrap">
-        <h3 class="queue-heading">The line</h3>
+        <div class="row queue-header">
+          <h3 class="queue-heading">Job queue</h3>
+          <span id="queue-summary" class="muted">0 active</span>
+        </div>
         <ol id="queue" class="queue"></ol>
-        <p id="queue-empty" class="hint">No volumes in line. Paste a URL to begin.</p>
+        <p id="queue-empty" class="hint">No jobs in the queue. Paste a URL to begin.</p>
       </section>
       <p class="hint">
         Leave this window open. Jobs from the web app or phone also run here.

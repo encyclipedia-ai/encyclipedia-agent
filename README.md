@@ -1,8 +1,9 @@
-# Encylipedia Helper
+# Encyclipedia Librarian
 
-A small app you install on a computer at home or in the studio.
-Leave it open. It shows that it is running, and you can paste a YouTube
-URL to clip. Jobs from the web app or your phone also run on this machine.
+Librarian is the required desktop companion for encyclipedia.ai. It securely
+downloads source media on your computer, scans captions for viral moments, and
+hands media to the renderer. Jobs submitted from the web app wait until a
+signed-in Librarian is online.
 
 ## Install
 
@@ -10,14 +11,15 @@ Download the app for your computer from the latest release:
 
 **https://github.com/encyclipedia-ai/encyclipedia-agent/releases/latest**
 
-- Mac: `Encylipedia Helper.dmg`
-- Windows: `Encylipedia Helper Setup.exe`
+- Mac: `Encyclipedia Librarian.dmg`
+- Windows: `Encyclipedia Librarian Setup.exe`
 - Linux: `.AppImage`
 
 Open it, sign in with the same email you use at
 [app.encyclipedia.ai](https://app.encyclipedia.ai), and leave the window open.
 
-That is the whole setup.
+The onboarding page detects the signed-in app automatically. Keep Librarian
+open whenever you submit or edit clips.
 
 ## Developers
 

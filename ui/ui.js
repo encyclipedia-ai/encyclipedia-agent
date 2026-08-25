@@ -16,6 +16,7 @@ const passwordInput = $("password");
 const togglePassword = $("toggle-password");
 const queueEl = $("queue");
 const queueEmpty = $("queue-empty");
+const queueSummary = $("queue-summary");
 
 const PHASE_LABEL = {
   queued: "In line",
@@ -41,17 +42,32 @@ function shortUrl(url) {
 
 function renderQueue(items) {
   const list = Array.isArray(items) ? items.slice() : [];
+  const active = list.filter((item) =>
+    ["lookup", "download", "analyze", "upload"].includes(item.phase),
+  ).length;
+  const waiting = list.filter((item) => item.phase === "queued").length;
+  const rendering = list.filter((item) => item.phase === "render").length;
+  queueSummary.textContent = [
+    `${active} active`,
+    waiting ? `${waiting} waiting` : null,
+    rendering ? `${rendering} rendering` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
   const rank = {
-    download: 0,
-    analyze: 1,
-    upload: 2,
-    lookup: 3,
+    lookup: 0,
+    download: 1,
+    analyze: 2,
+    upload: 3,
     queued: 4,
     render: 5,
     error: 6,
     done: 7,
   };
   list.sort((a, b) => (rank[a.phase] ?? 9) - (rank[b.phase] ?? 9) || a.addedAt - b.addedAt);
+  const waitingIds = list
+    .filter((item) => item.phase === "queued")
+    .map((item) => item.id);
   queueEl.replaceChildren();
   queueEmpty.classList.toggle("hidden", list.length > 0);
   for (const item of list) {
@@ -79,7 +95,11 @@ function renderQueue(items) {
     }
     const detail = document.createElement("p");
     detail.className = "queue-detail";
-    detail.textContent = item.detail || "";
+    const position = waitingIds.indexOf(item.id);
+    detail.textContent =
+      item.phase === "queued" && position >= 0
+        ? `Waiting · ${position + 1} of ${waitingIds.length} in line`
+        : item.detail || "";
     li.append(title, meta, detail);
     if (item.percent != null && (item.phase === "download" || item.phase === "upload")) {
       const bar = document.createElement("div");

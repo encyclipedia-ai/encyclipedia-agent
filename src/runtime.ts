@@ -233,13 +233,13 @@ export function startHelperLoop(onUpdate: HelperListener): () => void {
 
     const session = await restoreSession();
     if (!session) {
-      emit("signed_out", "Sign in to consult the librarian.");
+      emit("signed_out", "Sign in to connect Librarian to your account.");
       return;
     }
     let authed = session;
     cfg = authed;
 
-    emit("running", "The librarian is on duty, keeping watch over the stacks.");
+    emit("running", "Librarian is online and connected to your account.");
     let lastHeartbeat = 0;
     while (!stopped) {
       try {
@@ -256,7 +256,7 @@ export function startHelperLoop(onUpdate: HelperListener): () => void {
         });
         lastHeartbeat = now;
         if (!stopped && !activeMachineWork()) {
-          emit("running", "The librarian is on duty. Waiting for the next volume…");
+          emit("running", "Librarian is online. Waiting for the next job…");
         }
       }
       if (!hasMachineWork()) {
@@ -275,7 +275,7 @@ export function startHelperLoop(onUpdate: HelperListener): () => void {
         try {
           const updated = await refreshYtdlpIfNeeded();
           if (updated && !stopped) {
-            emit("running", "Updated the downloader. Waiting for the next volume…");
+            emit("running", "Updated the downloader. Waiting for the next job…");
           }
         } catch (err) {
           console.warn(

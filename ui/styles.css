@@ -360,6 +360,19 @@ button.ghost:hover:not(:disabled) {
   color: var(--muted);
 }
 
+.queue-header {
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.queue-header .queue-heading {
+  margin-bottom: 0;
+}
+
+.queue-header .muted {
+  font-size: 10px;
+}
+
 .queue {
   list-style: none;
   margin: 0;

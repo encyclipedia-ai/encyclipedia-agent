@@ -156,7 +156,7 @@ export async function withDownloaderLock<T>(fn: () => Promise<T>): Promise<T> {
 async function fetchLatestYtdlpVersion(): Promise<string | null> {
   const headers = {
     Accept: "application/vnd.github+json",
-    "User-Agent": "Encylipedia-Helper",
+    "User-Agent": "Encyclipedia-Librarian",
   };
   try {
     const res = await fetch(GITHUB_YTDLP_LATEST, {
@@ -175,7 +175,7 @@ async function fetchLatestYtdlpVersion(): Promise<string | null> {
     const res = await fetch(ytdlpAsset().url, {
       method: "HEAD",
       redirect: "manual",
-      headers: { "User-Agent": "Encylipedia-Helper" },
+      headers: { "User-Agent": "Encyclipedia-Librarian" },
       signal: AbortSignal.timeout(12_000),
     });
     const location = res.headers.get("location") ?? "";

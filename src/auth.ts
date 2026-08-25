@@ -75,7 +75,7 @@ export async function signInWithPassword(
   password: string,
 ): Promise<AgentConfig> {
   if (!cfg.firebaseApiKey) {
-    throw new Error("Missing sign-in configuration. Reinstall Encylipedia Helper.");
+    throw new Error("Missing sign-in configuration. Reinstall Encyclipedia Librarian.");
   }
   const res = await fetch(
     `${identityBase(cfg)}/accounts:signInWithPassword?key=${encodeURIComponent(cfg.firebaseApiKey)}`,
@@ -96,7 +96,7 @@ export async function createGoogleAuthSession(
   cfg: AgentConfig,
 ): Promise<GoogleAuthSession> {
   if (!cfg.firebaseApiKey) {
-    throw new Error("Missing sign-in configuration. Reinstall Encylipedia Helper.");
+    throw new Error("Missing sign-in configuration. Reinstall Encyclipedia Librarian.");
   }
 
   let lastError = "Could not start Google sign-in.";
@@ -130,7 +130,7 @@ export async function signInWithIdp(
   sessionId: string,
 ): Promise<AgentConfig> {
   if (!cfg.firebaseApiKey) {
-    throw new Error("Missing sign-in configuration. Reinstall Encylipedia Helper.");
+    throw new Error("Missing sign-in configuration. Reinstall Encyclipedia Librarian.");
   }
   const res = await fetch(
     `${identityBase(cfg)}/accounts:signInWithIdp?key=${encodeURIComponent(cfg.firebaseApiKey)}`,
@@ -198,14 +198,14 @@ export function oauthReturnError(url: string): string | null {
 
 export async function ensureFreshToken(cfg: AgentConfig): Promise<AgentConfig> {
   if (!cfg.idToken) {
-    throw new Error("Not signed in. Run Encylipedia Helper again to sign in.");
+    throw new Error("Not signed in. Open Encyclipedia Librarian again to sign in.");
   }
   const skewMs = 60_000;
   if (cfg.idTokenExpiresAt && Date.now() + skewMs < cfg.idTokenExpiresAt) {
     return cfg;
   }
   if (!cfg.refreshToken) {
-    throw new Error("Session expired. Run Encylipedia Helper again to sign in.");
+    throw new Error("Session expired. Open Encyclipedia Librarian again to sign in.");
   }
   const res = await fetch(
     `${tokenBase(cfg)}/token?key=${encodeURIComponent(cfg.firebaseApiKey)}`,

@@ -1,8 +1,8 @@
 {
   "name": "@encyclipedia-ai/agent",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "private": true,
-  "description": "Encylipedia Helper desktop app: download YouTube on the customer's computer.",
+  "description": "Encyclipedia Librarian desktop app: securely download source media on the customer's computer.",
   "license": "UNLICENSED",
   "type": "module",
   "main": "./dist/electron-main.js",
@@ -30,7 +30,7 @@
   },
   "build": {
     "appId": "ai.encyclipedia.helper",
-    "productName": "Encylipedia Helper",
+    "productName": "Encyclipedia Librarian",
     "executableName": "encyclipedia-librarian",
     "directories": {
       "output": "release"

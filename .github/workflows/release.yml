@@ -1,7 +1,7 @@
-name: Release Helper
+name: Release Librarian
 
-# Builds Encylipedia Helper (desktop app) for Mac, Windows, and Linux.
-# Tag `agent-v0.2.0` (or run this workflow manually) to publish.
+# Builds Encyclipedia Librarian (desktop app) for Mac, Windows, and Linux.
+# Tag `agent-v0.3.0` (or run this workflow manually) to publish.
 
 on:
   push:
@@ -46,7 +46,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: helper-${{ matrix.os }}
+          name: librarian-${{ matrix.os }}
           path: |
             release/*.dmg
             release/*.exe
@@ -67,6 +67,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('agent-nightly-{0}', github.run_id) }}
-          name: Encylipedia Helper ${{ github.ref_type == 'tag' && github.ref_name || 'nightly' }}
+          name: Encyclipedia Librarian ${{ github.ref_type == 'tag' && github.ref_name || 'nightly' }}
           generate_release_notes: true
           files: dist-out/**

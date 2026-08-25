@@ -11,7 +11,11 @@ const WIN_TASK = "Encylipedia Helper";
 export function helperInvocation(): { command: string; args: string[] } {
   const execPath = process.execPath;
   const selfName = path.basename(execPath).replace(/\.exe$/i, "");
-  if (selfName === "encyclipedia-agent" || selfName === "Encylipedia Helper") {
+  if (
+    selfName === "encyclipedia-agent" ||
+    selfName === "Encylipedia Helper" ||
+    selfName === "Encyclipedia Librarian"
+  ) {
     return { command: execPath, args: ["start"] };
   }
   const script = process.argv[1];
@@ -75,7 +79,7 @@ function writeLinuxUnit(command: string, args: string[]): string {
   fs.mkdirSync(path.dirname(unitPath), { recursive: true });
   const exec = [command, ...args].map((a) => (/\s/.test(a) ? `"${a}"` : a)).join(" ");
   const body = `[Unit]
-Description=Encylipedia Helper
+Description=Encyclipedia Librarian
 After=network-online.target
 
 [Service]
