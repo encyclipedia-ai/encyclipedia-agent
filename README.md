@@ -131,8 +131,8 @@ pnpm dist:linux
 GitHub release for `agent-v*` tags:
 
 ```bash
-git tag agent-v0.4.0
-git push origin agent-v0.4.0
+git tag agent-v1.0.0
+git push origin agent-v1.0.0
 ```
 
 The tag must match `package.json`. Manual workflow dispatch publishes a

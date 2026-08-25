@@ -1,6 +1,6 @@
 {
   "name": "@encyclipedia-ai/agent",
-  "version": "0.4.0",
+  "version": "1.0.0",
   "private": true,
   "description": "Encyclipedia Librarian desktop app: securely download source media on the customer's computer.",
   "license": "UNLICENSED",
@@ -39,7 +39,8 @@
     "artifactName": "Encyclipedia-Librarian-${version}-${os}-${arch}.${ext}",
     "files": [
       "dist/**/*",
-      "ui/**/*"
+      "ui/**/*",
+      "build/icon.png"
     ],
     "afterSign": "scripts/notarize.cjs",
     "publish": [
@@ -51,17 +52,20 @@
     ],
     "mac": {
       "category": "public.app-category.video",
+      "icon": "build/generated/icons/icon.icns",
       "target": [
         "dmg",
         "zip"
       ]
     },
     "win": {
+      "icon": "build/generated/icons/icon.ico",
       "target": [
         "nsis"
       ]
     },
     "linux": {
+      "icon": "build/icon.png",
       "target": [
         "AppImage"
       ],

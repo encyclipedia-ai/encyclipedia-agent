@@ -23,6 +23,10 @@ import {
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const ui = (...parts: string[]) => path.join(here, "..", "ui", ...parts);
+const brandAsset = (...parts: string[]) =>
+  path.join(here, "..", "build", ...parts);
+
+app.setName("Encyclipedia Librarian");
 
 let win: BrowserWindow | null = null;
 let stopLoop: (() => void) | null = null;
@@ -152,7 +156,8 @@ function createWindow(): void {
     height: 820,
     minWidth: 420,
     minHeight: 640,
-    title: "The Librarian",
+    title: "Encyclipedia Librarian",
+    icon: brandAsset("icon.png"),
     backgroundColor: "#f1ead8",
     autoHideMenuBar: true,
     webPreferences: {
