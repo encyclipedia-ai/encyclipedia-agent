@@ -45,6 +45,7 @@ jobs:
         run: node scripts/verify-release-tag.cjs
 
       - name: Install and package
+        shell: bash
         env:
           CSC_LINK: ${{ matrix.os == 'macos-latest' && secrets.MAC_CERT_P12 || matrix.os == 'windows-latest' && secrets.WINDOWS_CERT_P12 || '' }}
           CSC_KEY_PASSWORD: ${{ matrix.os == 'macos-latest' && secrets.MAC_CERT_PASSWORD || matrix.os == 'windows-latest' && secrets.WINDOWS_CERT_PASSWORD || '' }}
@@ -53,6 +54,9 @@ jobs:
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
+          if [ -z "${CSC_LINK:-}" ]; then
+            unset CSC_LINK CSC_KEY_PASSWORD
+          fi
           pnpm install --frozen-lockfile
           pnpm test
           pnpm ${{ matrix.script }}
