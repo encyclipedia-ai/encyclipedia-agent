@@ -18,14 +18,14 @@ import {
 } from "./service.js";
 
 function usage(): never {
-  console.log(`Encylipedia Helper
+  console.log(`Encyclipedia Librarian
 
 Open the desktop app to clip. This CLI is optional.
 
   encyclipedia-agent              Sign in and run in the background
-  encyclipedia-agent stop         Stop the background helper
+  encyclipedia-agent stop         Stop Librarian
   encyclipedia-agent logout       Sign out
-  encyclipedia-agent uninstall    Remove the background helper
+  encyclipedia-agent uninstall    Remove Librarian
 
 Config: ${configPath()}
 `);
@@ -95,15 +95,15 @@ async function cmdStart(): Promise<void> {
 
 async function cmdSetup(): Promise<void> {
   console.log("");
-  console.log("Encylipedia Helper");
-  console.log("Prefer the desktop app: pnpm app   (or the downloaded Helper.app)");
+  console.log("Encyclipedia Librarian");
+  console.log("Prefer the desktop app: pnpm app   (or the downloaded Librarian app)");
   console.log("");
   await ensureTools();
   const session = await restoreSession();
   if (!session) await cmdLogin();
   try {
     await installBackgroundService();
-    console.log("Helper is running in the background and will start when you log in.");
+    console.log("Librarian is running in the background and will start when you log in.");
     console.log("Clip from https://app.encyclipedia.ai/clipper");
   } catch (err) {
     console.warn(
@@ -111,7 +111,7 @@ async function cmdSetup(): Promise<void> {
     );
     try {
       spawnForegroundDetached();
-      console.log("Helper is running. You can close this window.");
+      console.log("Librarian is running. You can close this window.");
     } catch {
       await cmdStart();
     }
@@ -148,11 +148,11 @@ switch (cmd) {
     break;
   case "stop":
     stopBackgroundService();
-    console.log("Helper stopped.");
+    console.log("Librarian stopped.");
     break;
   case "uninstall":
     uninstallBackgroundService();
-    console.log("Background helper removed.");
+    console.log("Background Librarian removed.");
     break;
   default:
     usage();

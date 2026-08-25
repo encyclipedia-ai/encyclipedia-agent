@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Encylipedia Helper — one-line install for Mac and Linux.
+# Encyclipedia Librarian — one-line install for Mac and Linux.
 # Usage: curl -fsSL https://raw.githubusercontent.com/encyclipedia-ai/encyclipedia-agent/main/install.sh | bash
 set -euo pipefail
 
@@ -26,7 +26,7 @@ tmp="$(mktemp)"
 cleanup() { rm -f "${tmp}"; }
 trap cleanup EXIT
 
-say "Installing Encylipedia Helper…"
+say "Installing Encyclipedia Librarian…"
 url="https://github.com/${REPO}/releases/latest/download/${asset}"
 if curl -fsSL "${url}" -o "${tmp}"; then
   mv "${tmp}" "${BIN}"
@@ -34,7 +34,7 @@ if curl -fsSL "${url}" -o "${tmp}"; then
   trap - EXIT
 else
   say "No prebuilt download yet — building from source (needs Node 20+)…"
-  command -v node >/dev/null || die "Node.js 20+ is required until a Helper release is published."
+  command -v node >/dev/null || die "Node.js 20+ is required until a Librarian release is published."
   src="$(mktemp -d)"
   curl -fsSL "https://github.com/${REPO}/archive/refs/heads/main.tar.gz" | tar -xz -C "${src}" --strip-components=1
   (
@@ -62,7 +62,7 @@ add_path() {
   local file="$1"
   [[ -f "${file}" ]] || return 0
   grep -Fqs '.encyclipedia/bin' "${file}" && return 0
-  printf '\n# Encylipedia Helper\n%s\n' "${path_line}" >> "${file}"
+  printf '\n# Encyclipedia Librarian\n%s\n' "${path_line}" >> "${file}"
 }
 add_path "${HOME}/.zprofile"
 add_path "${HOME}/.zshrc"
@@ -77,6 +77,6 @@ ln -sf "${BIN}" "${HOME}/.local/bin/encyclipedia-agent" 2>/dev/null || true
 
 say ""
 say "Installed to ${BIN}"
-say "Next: sign in with your encyclipedia.ai email. The helper will keep running after that."
+say "Next: sign in with your encyclipedia.ai email. Librarian will keep running after that."
 say ""
 exec "${BIN}"
