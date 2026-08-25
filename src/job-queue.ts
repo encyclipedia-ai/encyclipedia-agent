@@ -42,6 +42,7 @@ export type QueueProcessor = (
 
 const KEEP_FINISHED = 15;
 const MACHINE_PHASES = new Set<WorkPhase>(["lookup", "download", "analyze", "upload"]);
+const TERMINAL_PHASES = new Set<WorkPhase>(["done", "error"]);
 
 let items: QueueItem[] = [];
 let processor: QueueProcessor | null = null;
@@ -94,6 +95,17 @@ export function hasMachineWork(): boolean {
 
 export function activeMachineWork(): QueueItem | undefined {
   return items.find((item) => MACHINE_PHASES.has(item.phase));
+}
+
+export function queueIsIdle(
+  queue: ReadonlyArray<Pick<QueueItem, "phase">>,
+  isDraining: boolean,
+): boolean {
+  return !isDraining && queue.every((item) => TERMINAL_PHASES.has(item.phase));
+}
+
+export function isQueueIdle(): boolean {
+  return queueIsIdle(items, draining);
 }
 
 function makeItem(

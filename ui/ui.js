@@ -17,6 +17,10 @@ const togglePassword = $("toggle-password");
 const queueEl = $("queue");
 const queueEmpty = $("queue-empty");
 const queueSummary = $("queue-summary");
+const updateCard = $("update-card");
+const updateDot = $("update-dot");
+const updateLabel = $("update-label");
+const updateMessage = $("update-message");
 
 const PHASE_LABEL = {
   queued: "In line",
@@ -150,6 +154,26 @@ function apply(snap) {
   renderQueue(snap.queue);
 }
 
+function applyUpdate(snap) {
+  if (!snap || snap.phase === "disabled") {
+    updateCard.classList.add("hidden");
+    return;
+  }
+
+  updateCard.classList.remove("hidden");
+  const labels = {
+    checking: "Checking for updates",
+    current: "Up to date",
+    downloading: `Downloading update${Number.isFinite(snap.percent) ? ` · ${snap.percent}%` : ""}`,
+    waiting: "Update ready",
+    installing: "Installing update",
+    failed: "Update unavailable",
+  };
+  updateLabel.textContent = labels[snap.phase] ?? "Librarian update";
+  updateMessage.textContent = snap.message || "";
+  updateDot.className = `update-dot update-${snap.phase}`;
+}
+
 togglePassword.addEventListener("click", () => {
   const show = passwordInput.type === "password";
   passwordInput.type = show ? "text" : "password";
@@ -214,3 +238,5 @@ clipForm.addEventListener("submit", async (event) => {
 
 window.helper.onState(apply);
 void window.helper.getState().then(apply);
+window.helper.onUpdateState(applyUpdate);
+void window.helper.getUpdateState().then(applyUpdate);

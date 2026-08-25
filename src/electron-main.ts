@@ -16,6 +16,10 @@ import {
   startHelperLoop,
   type HelperSnapshot,
 } from "./runtime.js";
+import {
+  initializeUpdater,
+  type UpdaterController,
+} from "./updater.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const ui = (...parts: string[]) => path.join(here, "..", "ui", ...parts);
@@ -30,6 +34,8 @@ let last: HelperSnapshot = {
   queue: [],
 };
 let googleSignInOpen = false;
+let signInInProgress = false;
+let updater: UpdaterController | null = null;
 
 function send(channel: string, payload: unknown): void {
   win?.webContents.send(channel, payload);
@@ -163,6 +169,7 @@ function createWindow(): void {
 }
 
 ipcMain.handle("helper:get-state", () => last);
+ipcMain.handle("helper:get-update-state", () => updater?.getState() ?? null);
 
 ipcMain.handle(
   "helper:sign-in",
@@ -170,6 +177,7 @@ ipcMain.handle(
     const email = body.email?.trim() ?? "";
     const password = body.password ?? "";
     if (!email || !password) throw new Error("Email and password are required.");
+    signInInProgress = true;
     emit({
       status: "starting",
       email,
@@ -198,6 +206,9 @@ ipcMain.handle(
         queue: [],
       });
       throw new Error(message);
+    } finally {
+      signInInProgress = false;
+      updater?.reconsiderInstall();
     }
   },
 );
@@ -246,6 +257,7 @@ ipcMain.handle("helper:sign-in-google", async () => {
     throw new Error(message);
   } finally {
     googleSignInOpen = false;
+    updater?.reconsiderInstall();
   }
 });
 
@@ -283,6 +295,14 @@ app.whenReady().then(async () => {
       busy: false,
     });
   }
+  updater = initializeUpdater({
+    restartBlocked: () => googleSignInOpen || signInInProgress,
+    prepareToInstall: () => {
+      stopLoop?.();
+      stopLoop = null;
+    },
+    sendStatus: (snapshot) => send("helper:update-state", snapshot),
+  });
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
@@ -294,5 +314,6 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", () => {
+  updater?.dispose();
   stopLoop?.();
 });
