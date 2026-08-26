@@ -1,6 +1,6 @@
 {
   "name": "@encyclipedia-ai/agent",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "Encyclipedia Librarian desktop app: securely download source media on the customer's computer.",
   "license": "UNLICENSED",
