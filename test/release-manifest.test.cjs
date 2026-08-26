@@ -11,15 +11,15 @@ test("builds a private-repository-independent public release manifest", () => {
 
   try {
     writeFileSync(
-      path.join(fixtureDir, "Encyclipedia-Librarian-1.0.1-mac-universal.dmg"),
+      path.join(fixtureDir, "Encyclipedia-Librarian-1.0.2-mac-universal.dmg"),
       "mac",
     );
     writeFileSync(
-      path.join(fixtureDir, "Encyclipedia-Librarian-1.0.1-win-x64.exe"),
+      path.join(fixtureDir, "Encyclipedia-Librarian-1.0.2-win-x64.exe"),
       "windows",
     );
     writeFileSync(
-      path.join(fixtureDir, "Encyclipedia-Librarian-1.0.1-linux-x86_64.AppImage"),
+      path.join(fixtureDir, "Encyclipedia-Librarian-1.0.2-linux-x86_64.AppImage"),
       "linux",
     );
     writeFileSync(
@@ -39,18 +39,21 @@ test("builds a private-repository-independent public release manifest", () => {
         env: {
           ...process.env,
           RELEASE_PUBLISHED_AT: "2026-08-25T00:00:00.000Z",
-          RELEASE_TAG: "agent-v1.0.1",
+          RELEASE_TAG: "agent-v1.0.2",
         },
       },
     );
 
     assert.equal(result.status, 0, result.stderr);
     const manifest = JSON.parse(readFileSync(outputPath, "utf8"));
-    assert.equal(manifest.version, "1.0.1");
-    assert.equal(manifest.tag, "agent-v1.0.1");
-    assert.match(manifest.downloads.macos.url, /1\.0\.1-mac-universal\.dmg$/);
-    assert.match(manifest.downloads.windows.url, /1\.0\.1-win-x64\.exe$/);
-    assert.match(manifest.downloads.linux.url, /1\.0\.1-linux-x86_64\.AppImage$/);
+    assert.equal(manifest.version, "1.0.2");
+    assert.equal(manifest.tag, "agent-v1.0.2");
+    assert.match(
+      manifest.downloads.macos.url,
+      /^https:\/\/storage\.googleapis\.com\/production-496405-librarian-downloads\/librarian\/.*1\.0\.2-mac-universal\.dmg$/,
+    );
+    assert.match(manifest.downloads.windows.url, /1\.0\.2-win-x64\.exe$/);
+    assert.match(manifest.downloads.linux.url, /1\.0\.2-linux-x86_64\.AppImage$/);
     assert.equal(manifest.downloads.macos.sha256.length, 64);
   } finally {
     rmSync(fixtureDir, { recursive: true, force: true });

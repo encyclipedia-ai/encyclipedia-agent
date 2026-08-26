@@ -54,9 +54,10 @@ one token refresh before failing.
 ## Automatic updates
 
 Packaged apps check the public
-`https://downloads.encyclipedia.ai/librarian/` feed automatically and download
-updates in the background. The source repository can remain private because the
-feed contains only installers, blockmaps, checksums, and update metadata.
+`https://storage.googleapis.com/production-496405-librarian-downloads/librarian/`
+feed automatically and download updates in the background. The source repository
+can remain private because the feed contains only installers, blockmaps,
+checksums, and update metadata.
 Librarian installs and relaunches only when its queue has no queued, local, or
 renderer-waiting jobs and no sign-in window is open. Completed and failed jobs
 do not block an update. Development sessions do not contact the release feed.

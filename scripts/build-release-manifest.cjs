@@ -7,7 +7,7 @@ const { version } = require("../package.json");
 const releaseDir = path.resolve(process.argv[2] ?? "dist-out");
 const outputPath = path.resolve(process.argv[3] ?? path.join(releaseDir, "latest.json"));
 const baseUrl = (process.env.LIBRARIAN_DOWNLOAD_BASE_URL ||
-  "https://downloads.encyclipedia.ai/librarian/").replace(/\/?$/, "/");
+  "https://storage.googleapis.com/production-496405-librarian-downloads/librarian/").replace(/\/?$/, "/");
 
 const files = readdirSync(releaseDir);
 

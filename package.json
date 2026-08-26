@@ -1,6 +1,6 @@
 {
   "name": "@encyclipedia-ai/agent",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "private": true,
   "description": "Encyclipedia Librarian desktop app: securely download source media on the customer's computer.",
   "license": "UNLICENSED",
@@ -46,7 +46,7 @@
     "publish": [
       {
         "provider": "generic",
-        "url": "https://downloads.encyclipedia.ai/librarian/"
+        "url": "https://storage.googleapis.com/production-496405-librarian-downloads/librarian/"
       }
     ],
     "mac": {
