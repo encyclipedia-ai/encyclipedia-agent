@@ -6,6 +6,11 @@ module.exports = async function notarizeMac(context) {
 
   const { APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, APPLE_TEAM_ID } = process.env;
   if (!APPLE_ID || !APPLE_APP_SPECIFIC_PASSWORD || !APPLE_TEAM_ID) {
+    if (process.env.CSC_LINK) {
+      throw new Error(
+        "The macOS app was signed, but APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, and APPLE_TEAM_ID are required to notarize it.",
+      );
+    }
     console.log("Apple notarization credentials are absent; publishing unsigned macOS artifacts.");
     return;
   }

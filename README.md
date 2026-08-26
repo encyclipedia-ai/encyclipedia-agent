@@ -133,8 +133,8 @@ pnpm dist:linux
 release, and publishes stable tagged builds to the public GCS/CDN feed:
 
 ```bash
-git tag agent-v1.0.0
-git push origin agent-v1.0.0
+git tag agent-v1.0.2
+git push origin agent-v1.0.2
 ```
 
 The tag must match `package.json`. Manual workflow dispatch publishes a
@@ -142,7 +142,16 @@ prerelease `agent-nightly-<run-id>` and does not replace the stable update feed.
 The repository variables `GCP_WIF_PROVIDER`, `GCP_RELEASE_SA`, and
 `GCP_DOWNLOADS_BUCKET` authorize tagged workflows through short-lived Workload
 Identity Federation credentials; no service-account key is stored in GitHub.
-Apple and Windows certificate secrets are optional, so CI still produces
-unsigned installers until credentials are configured. Reliable production
-macOS auto-updates should be signed and notarized; Windows Authenticode signing
-avoids trust warnings.
+Tagged macOS releases require Developer ID signing and Apple notarization.
+Without those GitHub secrets, Gatekeeper shows “Apple could not verify …
+is free of malware.” Configure:
+
+- `MAC_CERT_P12` — base64-encoded Developer ID Application `.p12`
+- `MAC_CERT_PASSWORD` — password for that `.p12`
+- `APPLE_ID` — Apple ID used for notarization
+- `APPLE_APP_SPECIFIC_PASSWORD` — app-specific password for that Apple ID
+- `APPLE_TEAM_ID` — 10-character Team ID
+
+Nightly workflow_dispatch builds may still be unsigned. Windows Authenticode
+signing (`WINDOWS_CERT_P12` / `WINDOWS_CERT_PASSWORD`) avoids SmartScreen
+warnings but is not required for the macOS Gatekeeper dialog.

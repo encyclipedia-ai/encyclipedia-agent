@@ -1,6 +1,6 @@
 {
   "name": "@encyclipedia-ai/agent",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "private": true,
   "description": "Encyclipedia Librarian desktop app: securely download source media on the customer's computer.",
   "license": "UNLICENSED",
@@ -31,8 +31,7 @@
   },
   "build": {
     "appId": "ai.encyclipedia.helper",
-    "productName": "Encyclipedia - Librarian",
-    "executableName": "encyclipedia-librarian",
+    "productName": "Encyclipedia Librarian",
     "directories": {
       "output": "release"
     },
@@ -43,6 +42,7 @@
       "build/icon.png"
     ],
     "afterSign": "scripts/notarize.cjs",
+    "afterAllArtifactBuild": "scripts/notarize-artifacts.cjs",
     "publish": [
       {
         "provider": "generic",
@@ -52,9 +52,13 @@
     "mac": {
       "category": "public.app-category.video",
       "icon": "build/generated/icons/mac/icon.icns",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
       "extendInfo": {
-        "CFBundleDisplayName": "Encyclipedia - Librarian",
-        "CFBundleName": "Encyclipedia - Librarian"
+        "CFBundleDisplayName": "Encyclipedia Librarian",
+        "CFBundleName": "Encyclipedia Librarian"
       },
       "target": [
         "dmg",
@@ -68,6 +72,7 @@
       ]
     },
     "linux": {
+      "executableName": "encyclipedia-librarian",
       "icon": "build/icon.png",
       "target": [
         "AppImage"
