@@ -10,9 +10,16 @@ on:
     tags:
       - "agent-v*"
   workflow_dispatch:
+    inputs:
+      publish_stable:
+        description: "Also publish this build to the public stable feed"
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: write
+  id-token: write
 
 jobs:
   release:
@@ -77,10 +84,59 @@ jobs:
     needs: release
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
           path: dist-out
           merge-multiple: true
+
+      - name: Build public download manifest
+        if: github.ref_type == 'tag' || inputs.publish_stable
+        env:
+          RELEASE_PUBLISHED_AT: ${{ github.event.head_commit.timestamp }}
+          RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+        run: node scripts/build-release-manifest.cjs dist-out dist-out/latest.json
+
+      - name: Authenticate to Google Cloud
+        if: github.ref_type == 'tag' || inputs.publish_stable
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_RELEASE_SA }}
+
+      - name: Set up Google Cloud CLI
+        if: github.ref_type == 'tag' || inputs.publish_stable
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Publish public installers and OTA metadata
+        if: github.ref_type == 'tag' || inputs.publish_stable
+        env:
+          DOWNLOADS_BUCKET: ${{ vars.GCP_DOWNLOADS_BUCKET }}
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          VERSION_ROOT="gs://${DOWNLOADS_BUCKET}/librarian/releases/${VERSION}"
+          LATEST_ROOT="gs://${DOWNLOADS_BUCKET}/librarian"
+
+          gcloud storage cp \
+            --cache-control="public,max-age=31536000,immutable" \
+            dist-out/* "${VERSION_ROOT}/"
+
+          gcloud storage cp \
+            --cache-control="public,max-age=31536000,immutable" \
+            dist-out/*.dmg dist-out/*.exe dist-out/*.AppImage \
+            dist-out/*.zip dist-out/*.blockmap \
+            "${LATEST_ROOT}/"
+
+          gcloud storage cp \
+            --cache-control="no-store,max-age=0" \
+            dist-out/latest.yml dist-out/latest-mac.yml dist-out/latest-linux.yml \
+            "${LATEST_ROOT}/"
+
+          gcloud storage cp \
+            --cache-control="no-store,max-age=0" \
+            --content-type="application/json" \
+            dist-out/latest.json "${LATEST_ROOT}/latest.json"
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2

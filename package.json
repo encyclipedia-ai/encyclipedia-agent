@@ -1,6 +1,6 @@
 {
   "name": "@encyclipedia-ai/agent",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "Encyclipedia Librarian desktop app: securely download source media on the customer's computer.",
   "license": "UNLICENSED",
@@ -24,7 +24,7 @@
     "dist:win": "tsc -p tsconfig.json && electron-builder --win --publish never",
     "dist:linux": "tsc -p tsconfig.json && electron-builder --linux --publish never",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "tsx --test test/job-queue.test.ts test/update-gate.test.ts"
+    "test": "tsx --test test/job-queue.test.ts test/update-gate.test.ts test/release-manifest.test.cjs"
   },
   "engines": {
     "node": ">=20"
@@ -45,9 +45,8 @@
     "afterSign": "scripts/notarize.cjs",
     "publish": [
       {
-        "provider": "github",
-        "owner": "encyclipedia-ai",
-        "repo": "encyclipedia-agent"
+        "provider": "generic",
+        "url": "https://downloads.encyclipedia.ai/librarian/"
       }
     ],
     "mac": {
