@@ -39,7 +39,7 @@ still uploads the media and leaves analysis to the renderer.
 
 Download the latest release:
 
-<https://github.com/encyclipedia-ai/encyclipedia-agent/releases/latest>
+<https://encyclipedia.ai/librarian>
 
 - macOS: `.dmg`
 - Windows: NSIS `.exe`
@@ -53,11 +53,13 @@ one token refresh before failing.
 
 ## Automatic updates
 
-Packaged apps check stable GitHub Releases automatically and download updates
-in the background. Librarian installs and relaunches only when its queue has no
-queued, local, or renderer-waiting jobs and no sign-in window is open. Completed
-and failed jobs do not block an update. Development sessions do not contact the
-release feed.
+Packaged apps check the public
+`https://downloads.encyclipedia.ai/librarian/` feed automatically and download
+updates in the background. The source repository can remain private because the
+feed contains only installers, blockmaps, checksums, and update metadata.
+Librarian installs and relaunches only when its queue has no queued, local, or
+renderer-waiting jobs and no sign-in window is open. Completed and failed jobs
+do not block an update. Development sessions do not contact the release feed.
 
 ## Browser cookies
 
@@ -127,8 +129,8 @@ pnpm dist:win
 pnpm dist:linux
 ```
 
-`.github/workflows/release.yml` packages all three platforms and publishes a
-GitHub release for `agent-v*` tags:
+`.github/workflows/release.yml` packages all three platforms, archives a GitHub
+release, and publishes stable tagged builds to the public GCS/CDN feed:
 
 ```bash
 git tag agent-v1.0.0
@@ -137,6 +139,9 @@ git push origin agent-v1.0.0
 
 The tag must match `package.json`. Manual workflow dispatch publishes a
 prerelease `agent-nightly-<run-id>` and does not replace the stable update feed.
+The repository variables `GCP_WIF_PROVIDER`, `GCP_RELEASE_SA`, and
+`GCP_DOWNLOADS_BUCKET` authorize tagged workflows through short-lived Workload
+Identity Federation credentials; no service-account key is stored in GitHub.
 Apple and Windows certificate secrets are optional, so CI still produces
 unsigned installers until credentials are configured. Reliable production
 macOS auto-updates should be signed and notarized; Windows Authenticode signing
