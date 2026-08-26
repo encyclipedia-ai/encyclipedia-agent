@@ -1,9 +1,8 @@
 name: Release Librarian
 
 # Builds Encyclipedia Librarian (desktop app) for Mac, Windows, and Linux.
-# Tag `agent-v1.0.0` (or run this workflow manually) to publish.
-# Optional MAC_CERT_P12/MAC_CERT_PASSWORD/Apple and WINDOWS_CERT_P12/
-# WINDOWS_CERT_PASSWORD secrets enable signing; unsigned packages remain valid.
+# Tag `agent-v1.0.2` (or run this workflow manually) to publish.
+# Tagged macOS releases require MAC_CERT_P12 plus Apple notarization secrets.
 
 on:
   push:
@@ -50,6 +49,26 @@ jobs:
         env:
           RELEASE_TAG: ${{ github.ref_name }}
         run: node scripts/verify-release-tag.cjs
+
+      - name: Require Apple signing for tagged macOS releases
+        if: matrix.os == 'macos-latest' && github.ref_type == 'tag'
+        env:
+          CSC_LINK: ${{ secrets.MAC_CERT_P12 }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          missing=()
+          [ -n "${CSC_LINK:-}" ] || missing+=(MAC_CERT_P12)
+          [ -n "${CSC_KEY_PASSWORD:-}" ] || missing+=(MAC_CERT_PASSWORD)
+          [ -n "${APPLE_ID:-}" ] || missing+=(APPLE_ID)
+          [ -n "${APPLE_APP_SPECIFIC_PASSWORD:-}" ] || missing+=(APPLE_APP_SPECIFIC_PASSWORD)
+          [ -n "${APPLE_TEAM_ID:-}" ] || missing+=(APPLE_TEAM_ID)
+          if [ "${#missing[@]}" -ne 0 ]; then
+            echo "Tagged macOS releases must be Developer ID signed and notarized. Add GitHub secrets: ${missing[*]}"
+            exit 1
+          fi
 
       - name: Install and package
         shell: bash

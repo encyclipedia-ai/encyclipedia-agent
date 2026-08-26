@@ -13,6 +13,7 @@ export function helperInvocation(): { command: string; args: string[] } {
   const selfName = path.basename(execPath).replace(/\.exe$/i, "");
   if (
     selfName === "encyclipedia-agent" ||
+    selfName === "encyclipedia-librarian" ||
     selfName === "Encylipedia Helper" ||
     selfName === "Encyclipedia Librarian"
   ) {

@@ -25,7 +25,7 @@ const ui = (...parts: string[]) => path.join(here, "..", "ui", ...parts);
 const brandAsset = (...parts: string[]) =>
   path.join(here, "..", "build", ...parts);
 
-app.setName("Encyclipedia - Librarian");
+app.setName("Encyclipedia Librarian");
 
 let win: BrowserWindow | null = null;
 let stopLoop: (() => void) | null = null;
