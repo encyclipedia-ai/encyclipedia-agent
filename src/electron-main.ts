@@ -282,7 +282,7 @@ ipcMain.handle(
   async (_evt, body: { url?: string; clipLength?: "short" | "medium" }) => {
     const url = body.url?.trim() ?? "";
     if (!url) throw new Error("Paste a YouTube URL first.");
-    const item = queueClip(url, body.clipLength === "medium" ? "medium" : "short");
+    const item = await queueClip(url, body.clipLength === "medium" ? "medium" : "short");
     return { ok: true, id: item.id };
   },
 );

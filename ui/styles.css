@@ -444,6 +444,18 @@ button.ghost:hover:not(:disabled) {
   color: var(--muted);
 }
 
+.queue-version {
+  font-family: var(--font-serif);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 14%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--ok) 35%, var(--line));
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+
 .queue-detail {
   margin: 6px 0 0;
   font-size: 12px;

@@ -159,6 +159,20 @@ export function analyzeJob(
   );
 }
 
+export function submitProcess(
+  cfg: AgentConfig,
+  body: { url: string; clipLength: "short" | "medium" },
+) {
+  return request<{ jobId: string; status: string; deduped?: boolean }>(
+    cfg,
+    "/api/process",
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+    },
+  );
+}
+
 export function submitJob(
   cfg: AgentConfig,
   body: {
@@ -180,10 +194,24 @@ export function submitJob(
 }
 
 export function getJob(cfg: AgentConfig, jobId: string) {
-  return request<{ id: string; status: string; progress: string; error?: string }>(
-    cfg,
-    `/api/jobs/${encodeURIComponent(jobId)}`,
-  );
+  return request<{
+    id: string;
+    status: string;
+    progress: string;
+    error?: string;
+    kind?: "process" | "recut";
+    streamSlug?: string;
+    recutFilename?: string;
+    startSec?: number;
+    durationSec?: number;
+    videoTitle?: string;
+  }>(cfg, `/api/jobs/${encodeURIComponent(jobId)}`);
+}
+
+export function getStream(cfg: AgentConfig, slug: string) {
+  return request<{
+    clips: Array<{ filename: string; editVersion?: number }>;
+  }>(cfg, `/api/streams/${encodeURIComponent(slug)}`);
 }
 
 export interface ClaimedJob {

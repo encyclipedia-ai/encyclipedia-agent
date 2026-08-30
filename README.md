@@ -17,15 +17,20 @@ completion only after it confirms that a registered Librarian is online.
 Keep the app or background service running whenever submitting or recutting
 clips.
 
+Pasting a URL in Librarian uses the same `POST /api/process` path as the web
+clipper, so the job appears on the dashboard immediately as `awaiting_media`.
+Librarian then downloads, uploads, and completes that job.
+
 For a normal process job, Librarian:
 
-1. claims the next `awaiting_media` job for the signed-in user;
+1. creates or reuses the Firestore job (`POST /api/process`), or claims the
+   next `awaiting_media` job submitted from the web;
 2. looks up and downloads the YouTube source on that computer;
 3. downloads captions and asks the API to analyze them for clip candidates
    when captions are available;
 4. requests upload targets and uploads source media and captions directly to
    storage;
-5. completes the claim through the API, including source metadata and the
+5. completes the job through the API, including source metadata and the
    optional clip plan;
 6. waits while the API queues the
    [renderer](https://github.com/encyclipedia-ai/viral-clip-extractor), then

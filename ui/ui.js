@@ -97,6 +97,12 @@ function renderQueue(items) {
       src.textContent = recut ? "Clip edit" : "From the web";
       meta.append(src);
     }
+    if (item.editVersion > 1) {
+      const ver = document.createElement("span");
+      ver.className = "queue-version";
+      ver.textContent = `v${item.editVersion}`;
+      meta.append(ver);
+    }
     const detail = document.createElement("p");
     detail.className = "queue-detail";
     const position = waitingIds.indexOf(item.id);

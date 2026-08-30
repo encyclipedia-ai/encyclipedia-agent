@@ -185,29 +185,38 @@ export async function waitForWorker(
   }
 }
 
+export function jobNeedsLibrarianMedia(status: string): boolean {
+  return status === "awaiting_media" || status === "agent_downloading";
+}
+
 export async function handoffLocalClip(
   cfg: AgentConfig,
   url: string,
   clipLength: "short" | "medium",
   onLog?: LogFn,
 ): Promise<string> {
-  const { video, source, clipPlan } = await ingestSource(cfg, url, onLog, { clipLength });
-  say(onLog, "Submitting…", { phase: "upload", percent: 100 });
-  const submitted = await api.submitJob(cfg, {
-    url,
-    clipLength,
-    video,
-    source,
-    clipPlan,
-  });
+  say(onLog, "Submitting…", { phase: "lookup" });
+  const submitted = await api.submitProcess(cfg, { url, clipLength });
   say(
     onLog,
     submitted.deduped
       ? `Reusing in-flight job ${submitted.jobId}`
-      : `Job ${submitted.jobId} queued`,
-    { phase: "render", cloudJobId: submitted.jobId },
+      : `Job ${submitted.jobId} is on the web. Downloading next…`,
+    { cloudJobId: submitted.jobId },
   );
-  return submitted.jobId;
+  if (!jobNeedsLibrarianMedia(submitted.status)) {
+    return submitted.jobId;
+  }
+  return handoffRemoteJob(
+    cfg,
+    {
+      jobId: submitted.jobId,
+      youtubeUrl: url,
+      clipLength,
+      videoId: null,
+    },
+    onLog,
+  );
 }
 
 export async function handoffRemoteJob(

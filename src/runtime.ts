@@ -7,6 +7,7 @@ import {
   handoffLocalClip,
   handoffRecut,
   handoffRemoteJob,
+  jobNeedsLibrarianMedia,
   runClip,
   waitForWorker,
   type LogFn,
@@ -135,13 +136,22 @@ async function withWork<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-export function queueClip(
+export async function queueClip(
   url: string,
   clipLength: "short" | "medium",
-): QueueItem {
+): Promise<QueueItem> {
   const trimmed = url.trim();
   if (!trimmed) throw new Error("Paste a YouTube URL first.");
-  return enqueueLocal(trimmed, clipLength);
+  const cfg = await ensureFreshToken(loadConfig());
+  await api.register(cfg, `${os.platform()}-${os.arch()}`, os.hostname());
+  const submitted = await api.submitProcess(cfg, { url: trimmed, clipLength });
+  const created = await api.getJob(cfg, submitted.jobId);
+  if (created.kind === "recut") {
+    throw new Error(
+      "An edit is already running for this video. Wait for it to finish before cutting the full stream again.",
+    );
+  }
+  return enqueueLocal(trimmed, clipLength, { remoteJobId: submitted.jobId });
 }
 
 export async function clipFromUrl(
@@ -186,28 +196,46 @@ export function startHelperLoop(onUpdate: HelperListener): () => void {
     };
     let cloudJobId: string;
     if (item.remoteJobId) {
+      const job = await api.getJob(authed, item.remoteJobId);
       const claim = {
         jobId: item.remoteJobId,
         youtubeUrl: item.url,
         clipLength: item.clipLength,
         videoId: null,
-        kind: item.kind,
-        startSec: item.startSec,
-        durationSec: item.durationSec,
-        title: item.title ?? undefined,
+        kind: job.kind ?? item.kind,
+        startSec: item.startSec ?? job.startSec,
+        durationSec: item.durationSec ?? job.durationSec,
+        title: item.title ?? job.videoTitle ?? undefined,
       };
-      cloudJobId = isRecutClaim(claim)
-        ? await handoffRecut(authed, claim, onLog)
-        : await handoffRemoteJob(authed, claim, onLog);
+      if (isRecutClaim(claim)) {
+        cloudJobId = jobNeedsLibrarianMedia(job.status)
+          ? await handoffRecut(authed, claim, onLog)
+          : item.remoteJobId;
+      } else if (!jobNeedsLibrarianMedia(job.status)) {
+        cloudJobId = item.remoteJobId;
+      } else {
+        cloudJobId = await handoffRemoteJob(authed, claim, onLog);
+      }
     } else {
       cloudJobId = await handoffLocalClip(authed, item.url, item.clipLength, onLog);
     }
     void waitForWorker(authed, cloudJobId, onLog)
-      .then(() => {
+      .then(async () => {
+        const finished = await api.getJob(authed, cloudJobId).catch(() => null);
+        let editVersion: number | undefined;
+        if (finished?.kind === "recut" && finished.streamSlug && finished.recutFilename) {
+          const stream = await api.getStream(authed, finished.streamSlug).catch(() => null);
+          editVersion = stream?.clips.find((clip) => clip.filename === finished.recutFilename)
+            ?.editVersion;
+        }
         updateQueueItem(item.id, {
           phase: "done",
           percent: 100,
-          detail: "Shelved. Clips are in your stacks.",
+          detail:
+            editVersion && editVersion > 1
+              ? `Shelved. Clip edit v${editVersion} is in your stacks.`
+              : "Shelved. Clips are in your stacks.",
+          editVersion,
         });
       })
       .catch((err) => {

@@ -25,13 +25,14 @@ export interface QueueItem {
   percent: number | null;
   detail: string;
   error?: string;
+  editVersion?: number;
   addedAt: number;
 }
 
 export type QueuePatch = Partial<
   Pick<
     QueueItem,
-    "phase" | "percent" | "detail" | "title" | "cloudJobId" | "error"
+    "phase" | "percent" | "detail" | "title" | "cloudJobId" | "error" | "editVersion"
   >
 >;
 
@@ -137,8 +138,24 @@ function makeItem(
 export function enqueueLocal(
   url: string,
   clipLength: "short" | "medium",
+  opts?: { remoteJobId?: string },
 ): QueueItem {
-  const item = makeItem({ url, clipLength, source: "local" });
+  if (opts?.remoteJobId) {
+    const existing = items.find(
+      (item) =>
+        item.remoteJobId === opts.remoteJobId &&
+        item.phase !== "done" &&
+        item.phase !== "error",
+    );
+    if (existing) return existing;
+  }
+  const item = makeItem({
+    url,
+    clipLength,
+    source: "local",
+    remoteJobId: opts?.remoteJobId,
+    kind: "process",
+  });
   items.push(item);
   emit();
   void drain();
