@@ -34,6 +34,14 @@ const PHASE_LABEL = {
 };
 
 function shortUrl(url) {
+  if (!url) return "";
+  if (url.startsWith("local://")) {
+    try {
+      return decodeURIComponent(url.slice("local://".length));
+    } catch {
+      return url.slice("local://".length);
+    }
+  }
   try {
     const parsed = new URL(url);
     const id = parsed.searchParams.get("v");
@@ -96,6 +104,12 @@ function renderQueue(items) {
           Number(item.durationSec) > 0);
       src.textContent = recut ? "Clip edit" : "From the web";
       meta.append(src);
+    }
+    if (item.editVersion > 1) {
+      const ver = document.createElement("span");
+      ver.className = "queue-version";
+      ver.textContent = `v${item.editVersion}`;
+      meta.append(ver);
     }
     const detail = document.createElement("p");
     detail.className = "queue-detail";
@@ -221,14 +235,12 @@ signOutBtn.addEventListener("click", () => {
 
 clipForm.addEventListener("submit", async (event) => {
   event.preventDefault();
-  const url = $("url").value.trim();
-  if (!url) return;
   const length = document.querySelector('input[name="length"]:checked')?.value ?? "short";
   clipBtn.disabled = true;
   try {
-    await window.helper.clip(url, length);
-    $("url").value = "";
-    $("url").focus();
+    const picked = await window.helper.pickClip();
+    if (!picked || picked.cancelled || !picked.path) return;
+    await window.helper.clipFile(picked.path, length);
   } catch (err) {
     statusMessage.textContent = err instanceof Error ? err.message : String(err);
   } finally {

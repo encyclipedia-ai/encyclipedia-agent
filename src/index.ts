@@ -3,7 +3,7 @@ import readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import { configPath } from "./config.js";
 import {
-  clipFromUrl,
+  clipFromFile,
   restoreSession,
   signIn,
   signOut,
@@ -23,6 +23,7 @@ function usage(): never {
 Open the desktop app to clip. This CLI is optional.
 
   encyclipedia-agent              Sign in and run in the background
+  encyclipedia-agent clip <path>  Clip a local video file
   encyclipedia-agent stop         Stop Librarian
   encyclipedia-agent logout       Sign out
   encyclipedia-agent uninstall    Remove Librarian
@@ -134,12 +135,12 @@ async function main(): Promise<void> {
       console.log("Signed out.");
       break;
     case "clip": {
-      const url = rest.find((a) => !a.startsWith("--"));
-      if (!url) usage();
+      const filePath = rest.find((a) => !a.startsWith("--"));
+      if (!filePath) usage();
       let length: "short" | "medium" = "short";
       const li = rest.indexOf("--length");
       if (li >= 0 && rest[li + 1] === "medium") length = "medium";
-      await clipFromUrl(url, length, (update) =>
+      await clipFromFile(filePath, length, (update) =>
         console.log(typeof update === "string" ? update : update.detail ?? ""),
       );
       break;

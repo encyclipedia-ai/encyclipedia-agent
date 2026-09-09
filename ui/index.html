@@ -90,15 +90,6 @@
     <section id="clipper" class="card hidden">
       <h2 class="card-title">Request a clipping</h2>
       <form id="clip-form">
-        <label>
-          YouTube URL
-          <input
-            id="url"
-            type="url"
-            placeholder="https://www.youtube.com/watch?v=…"
-            required
-          />
-        </label>
         <div class="row lengths">
           <label class="choice">
             <input type="radio" name="length" value="short" checked />
@@ -109,7 +100,7 @@
             Medium
           </label>
         </div>
-        <button id="clip" type="submit">Clip this volume</button>
+        <button id="clip" type="submit">Choose a video to clip</button>
       </form>
       <section id="queue-wrap" class="queue-wrap">
         <div class="row queue-header">
@@ -117,7 +108,7 @@
           <span id="queue-summary" class="muted">0 active</span>
         </div>
         <ol id="queue" class="queue"></ol>
-        <p id="queue-empty" class="hint">No jobs in the queue. Paste a URL to begin.</p>
+        <p id="queue-empty" class="hint">No jobs in the queue. Choose a video file to begin.</p>
       </section>
       <p class="hint">
         Leave this window open. Jobs from the web app or phone also run here.
