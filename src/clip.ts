@@ -479,7 +479,7 @@ export async function handoffRecut(
     sweepDownloadTemps();
     const workDir = await fs.mkdtemp(path.join(os.tmpdir(), "encyclipedia-agent-"));
     try {
-      say(onLog, "Downloading the clip window…", { phase: "download", percent: 0 });
+      say(onLog, "Downloading the edit window…", { phase: "download", percent: 0 });
       const videoPath = isLocalFileIngest(claim)
         ? await downloadLocalRecutSource(cfg, claim, workDir, onLog)
         : await downloadSection(
