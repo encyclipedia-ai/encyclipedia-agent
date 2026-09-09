@@ -17,28 +17,35 @@ completion only after it confirms that a registered Librarian is online.
 Keep the app or background service running whenever submitting or recutting
 clips.
 
-Pasting a URL in Librarian uses the same `POST /api/process` path as the web
-clipper, so the job appears on the dashboard immediately as `awaiting_media`.
-Librarian then downloads, uploads, and completes that job.
+Pasting is no longer how Librarian starts a job. Choose a video file on this
+computer; Librarian uses the same `POST /api/process` path as the web clipper,
+so the job appears on the dashboard immediately as `awaiting_media`. Librarian
+then finds clip timestamps and uploads **only those short windows** (plus
+cheap audio when captions are missing). The full volume stays on this
+computer. Jobs submitted from the web clipper (YouTube, Twitch, Kick) are
+still claimed here and downloaded with yt-dlp — again, only the detected
+clip windows are uploaded.
 
-For a normal process job, Librarian:
+For a desktop file job, Librarian:
 
-1. creates or reuses the Firestore job (`POST /api/process`), or claims the
-   next `awaiting_media` job submitted from the web;
-2. looks up and downloads the YouTube source on that computer;
-3. downloads captions and asks the API to analyze them for clip candidates
-   when captions are available;
-4. requests upload targets and uploads source media and captions directly to
-   storage;
-5. completes the job through the API, including source metadata and the
-   optional clip plan;
+1. creates the Firestore job (`POST /api/process` with the filename);
+2. probes and, if needed, remuxes the file to mp4 on this computer;
+3. extracts a small audio file, transcribes it, and scans for viral moments;
+4. cuts and uploads only those clip windows to storage (not the full file);
+5. completes the job through the API with the clip plan and window keys;
 6. waits while the API queues the
    [renderer](https://github.com/encyclipedia-ai/viral-clip-extractor), then
    reports completion in the desktop queue.
 
-Recuts use the same claim/handoff contract but download and upload only the
-requested time window. If captions are missing or cannot be parsed, Librarian
-still uploads the media and leaves analysis to the renderer.
+For a web-submitted process job, Librarian claims the next `awaiting_media`
+job, prefers YouTube captions (no VOD download), transcribes audio only when
+captions are missing, then downloads and uploads each clip window with
+yt-dlp `--download-sections`.
+
+Recuts use the same claim/handoff contract. Web-origin recuts download a time
+window with yt-dlp. Recuts of desktop-uploaded volumes fetch a covering clip
+window (windows are padded ~15s) and cut it with ffmpeg. Large timing changes
+that fall outside those windows are not stored in the cloud.
 
 ## Install and sign in
 
@@ -113,6 +120,7 @@ The CLI is optional:
 ```bash
 pnpm dev                 # interactive setup, sign-in, background install
 pnpm dev -- start        # stay in the foreground and claim work
+pnpm dev -- clip ./talk.mp4 [--length medium]
 pnpm dev -- stop
 pnpm dev -- logout
 pnpm dev -- uninstall

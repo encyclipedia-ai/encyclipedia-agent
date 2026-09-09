@@ -566,16 +566,17 @@ function formatSectionTime(totalSeconds: number): string {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
-/** Download only [startSec, startSec+durationSec] — recuts are ~30–90s, not the full VOD. */
+/** Download only [startSec, startSec+durationSec] — clip windows, not the full VOD. */
 export async function downloadSection(
   url: string,
   startSec: number,
   durationSec: number,
   workDir: string,
   onProgress?: YtdlpProgressFn,
+  outputStem = "recut",
 ): Promise<string> {
   fs.mkdirSync(workDir, { recursive: true });
-  const output = path.join(workDir, "recut.%(ext)s");
+  const output = path.join(workDir, `${outputStem}.%(ext)s`);
   const section = `*${formatSectionTime(startSec)}-${formatSectionTime(startSec + durationSec)}`;
   const format = recutYoutubeFormat();
   const argv = [
@@ -596,17 +597,84 @@ export async function downloadSection(
   await run([...argv, url], { cwd: workDir, onProgress });
 
   const files = fs.readdirSync(workDir);
+  const expected = `${outputStem}.mp4`;
   let video =
-    files.find((f) => f === "recut.mp4") ?? files.find((f) => f.endsWith(".mp4"));
+    files.find((f) => f === expected) ?? files.find((f) => f.startsWith(`${outputStem}.`) && f.endsWith(".mp4"));
   if (!video) {
-    const other = files.find((f) => /\.(mkv|webm|mov)$/i.test(f));
+    const other = files.find(
+      (f) => f.startsWith(`${outputStem}.`) && /\.(mkv|webm|mov)$/i.test(f),
+    );
     if (!other) throw new Error("yt-dlp finished but no clip file was produced");
     onProgress?.({ percent: 100, detail: "Converting to mp4…" });
-    const dest = path.join(workDir, "recut.mp4");
+    const dest = path.join(workDir, expected);
     await remuxToMp4(path.join(workDir, other), dest);
-    video = "recut.mp4";
+    video = expected;
   }
   return path.join(workDir, video);
+}
+
+/** Fetch English captions without downloading the VOD. */
+export async function downloadCaptions(
+  url: string,
+  workDir: string,
+): Promise<string | null> {
+  fs.mkdirSync(workDir, { recursive: true });
+  const output = path.join(workDir, "captions");
+  try {
+    await run(
+      [
+        "--skip-download",
+        "--write-subs",
+        "--write-auto-subs",
+        "--sub-format",
+        "json3",
+        "--sub-langs",
+        "en.*,en",
+        "--no-playlist",
+        "--output",
+        output,
+        url,
+      ],
+      { cwd: workDir },
+    );
+  } catch {
+    return null;
+  }
+  const files = fs.readdirSync(workDir);
+  const captions = files.find((f) => f.endsWith(".json3")) ?? null;
+  return captions ? path.join(workDir, captions) : null;
+}
+
+/** Audio-only download for Whisper when captions are missing. */
+export async function downloadAudio(
+  url: string,
+  workDir: string,
+  onProgress?: YtdlpProgressFn,
+): Promise<string> {
+  fs.mkdirSync(workDir, { recursive: true });
+  const output = path.join(workDir, "audio.%(ext)s");
+  await run(
+    [
+      "--newline",
+      "--no-playlist",
+      "--no-part",
+      "-x",
+      "--audio-format",
+      "mp3",
+      "--audio-quality",
+      "7",
+      "--output",
+      output,
+      url,
+    ],
+    { cwd: workDir, onProgress },
+  );
+  const files = fs.readdirSync(workDir);
+  const audio =
+    files.find((f) => f === "audio.mp3") ??
+    files.find((f) => /^audio\./i.test(f) && /\.(mp3|m4a|opus|webm)$/i.test(f));
+  if (!audio) throw new Error("yt-dlp finished but no audio file was produced");
+  return path.join(workDir, audio);
 }
 
 export async function downloadSource(

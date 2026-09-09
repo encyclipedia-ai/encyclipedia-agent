@@ -52,6 +52,31 @@ export interface UploadTarget {
   headers: Record<string, string>;
 }
 
+export interface DownloadTarget {
+  bucket: string;
+  objectKey: string;
+  downloadUrl: string;
+  method: "GET";
+  headers: Record<string, string>;
+  windowStartSec?: number;
+  windowDurationSec?: number;
+}
+
+export type UploadKind = "video" | "captions" | "recut" | "audio" | "window";
+
+export interface SourceWindow {
+  objectKey: string;
+  startSec: number;
+  durationSec: number;
+}
+
+export interface JobSource {
+  bucket: string;
+  objectKey?: string;
+  subtitleKey?: string;
+  windows?: SourceWindow[];
+}
+
 async function request<T>(
   cfg: AgentConfig,
   path: string,
@@ -116,12 +141,34 @@ export function me(cfg: AgentConfig) {
 export function requestUploadUrl(
   cfg: AgentConfig,
   videoId: string,
-  kind: "video" | "captions" | "recut",
+  kind: UploadKind,
   contentType: string,
+  index?: number,
 ) {
   return request<UploadTarget>(cfg, "/api/agent/upload-url", {
     method: "POST",
-    body: JSON.stringify({ videoId, kind, contentType }),
+    body: JSON.stringify({
+      videoId,
+      kind,
+      contentType,
+      ...(kind === "window" ? { index } : {}),
+    }),
+  });
+}
+
+export function requestDownloadUrl(
+  cfg: AgentConfig,
+  videoId: string,
+  window?: { startSec: number; durationSec: number },
+) {
+  return request<DownloadTarget>(cfg, "/api/agent/download-url", {
+    method: "POST",
+    body: JSON.stringify({
+      videoId,
+      ...(window
+        ? { startSec: window.startSec, durationSec: window.durationSec }
+        : {}),
+    }),
   });
 }
 
@@ -135,6 +182,22 @@ export function analyze(
   },
 ) {
   return request<ClipPlan>(cfg, "/api/agent/analyze", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function transcribeJob(
+  cfg: AgentConfig,
+  jobId: string,
+  body: { bucket: string; objectKey: string },
+) {
+  return request<{
+    segments: TranscriptSegment[];
+    durationMinutes: number;
+    costUsd: number;
+    language: string;
+  }>(cfg, `/api/agent/jobs/${encodeURIComponent(jobId)}/transcribe`, {
     method: "POST",
     body: JSON.stringify(body),
   });
@@ -161,9 +224,11 @@ export function analyzeJob(
 
 export function submitProcess(
   cfg: AgentConfig,
-  body: { url: string; clipLength: "short" | "medium" },
+  body:
+    | { url: string; clipLength: "short" | "medium" }
+    | { localFile: { displayName: string }; clipLength: "short" | "medium" },
 ) {
-  return request<{ jobId: string; status: string; deduped?: boolean }>(
+  return request<{ jobId: string; status: string; deduped?: boolean; videoId?: string }>(
     cfg,
     "/api/process",
     {
@@ -179,7 +244,7 @@ export function submitJob(
     url: string;
     clipLength: "short" | "medium";
     video: VideoInfo;
-    source: { bucket: string; objectKey: string; subtitleKey?: string };
+    source: JobSource;
     clipPlan?: ClipPlan;
   },
 ) {
@@ -205,6 +270,8 @@ export function getJob(cfg: AgentConfig, jobId: string) {
     startSec?: number;
     durationSec?: number;
     videoTitle?: string;
+    ingestKind?: "local_file";
+    videoId?: string | null;
   }>(cfg, `/api/jobs/${encodeURIComponent(jobId)}`);
 }
 
@@ -220,6 +287,7 @@ export interface ClaimedJob {
   clipLength: "short" | "medium";
   videoId: string | null;
   kind?: "process" | "recut";
+  ingestKind?: "local_file";
   startSec?: number;
   durationSec?: number;
   title?: string;
@@ -238,7 +306,7 @@ export function completeJob(
   jobId: string,
   body: {
     video?: VideoInfo;
-    source: { bucket: string; objectKey: string; subtitleKey?: string };
+    source: JobSource;
     clipPlan?: ClipPlan;
   },
 ) {

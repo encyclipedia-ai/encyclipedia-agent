@@ -1,10 +1,11 @@
 import os from "node:os";
+import path from "node:path";
 import { clearSession, loadConfig, saveConfig, type AgentConfig } from "./config.js";
 import { ensureFreshToken, signInWithIdp, signInWithPassword } from "./auth.js";
 import * as api from "./api.js";
-import { isRecutClaim } from "./claim.js";
+import { isRecutClaim, isLocalFileIngest } from "./claim.js";
 import {
-  handoffLocalClip,
+  handoffLocalFile,
   handoffRecut,
   handoffRemoteJob,
   jobNeedsLibrarianMedia,
@@ -25,6 +26,7 @@ import {
   type QueueItem,
 } from "./job-queue.js";
 import { ensureTools, refreshYtdlpIfNeeded } from "./tools.js";
+import { assertReadableVideo } from "./media-file.js";
 import { sweepDownloadTemps } from "./ytdlp.js";
 
 export type HelperStatus = "signed_out" | "starting" | "running" | "working" | "error";
@@ -136,33 +138,47 @@ async function withWork<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-export async function queueClip(
-  url: string,
+export async function queueLocalFile(
+  filePath: string,
   clipLength: "short" | "medium",
 ): Promise<QueueItem> {
-  const trimmed = url.trim();
-  if (!trimmed) throw new Error("Paste a YouTube URL first.");
+  const resolved = path.resolve(filePath.trim());
+  await assertReadableVideo(resolved);
   const cfg = await ensureFreshToken(loadConfig());
   await api.register(cfg, `${os.platform()}-${os.arch()}`, os.hostname());
-  const submitted = await api.submitProcess(cfg, { url: trimmed, clipLength });
+  const displayName = path.basename(resolved);
+  const submitted = await api.submitProcess(cfg, {
+    localFile: { displayName },
+    clipLength,
+  });
   const created = await api.getJob(cfg, submitted.jobId);
   if (created.kind === "recut") {
     throw new Error(
       "An edit is already running for this video. Wait for it to finish before cutting the full stream again.",
     );
   }
-  return enqueueLocal(trimmed, clipLength, { remoteJobId: submitted.jobId });
+  const videoId = submitted.videoId ?? created.videoId ?? undefined;
+  if (!videoId) {
+    throw new Error("The API did not return a video id for this file.");
+  }
+  return enqueueLocal(`local://${encodeURIComponent(displayName)}`, clipLength, {
+    remoteJobId: submitted.jobId,
+    localPath: resolved,
+    title: displayName,
+    videoId,
+    ingestKind: "local_file",
+  });
 }
 
-export async function clipFromUrl(
-  url: string,
+export async function clipFromFile(
+  filePath: string,
   clipLength: "short" | "medium",
   onLog: LogFn,
 ): Promise<void> {
   await ensureTools();
   const cfg = await ensureFreshToken(loadConfig());
   await api.register(cfg, `${os.platform()}-${os.arch()}`, os.hostname());
-  await withWork(() => runClip(cfg, url.trim(), clipLength, onLog));
+  await withWork(() => runClip(cfg, path.resolve(filePath.trim()), clipLength, onLog));
 }
 
 export function startHelperLoop(onUpdate: HelperListener): () => void {
@@ -195,14 +211,31 @@ export function startHelperLoop(onUpdate: HelperListener): () => void {
       else report(update);
     };
     let cloudJobId: string;
-    if (item.remoteJobId) {
+    if (item.localPath && item.remoteJobId) {
+      const videoId = item.videoId;
+      if (!videoId) throw new Error("The API did not return a video id for this file.");
+      const job = await api.getJob(authed, item.remoteJobId);
+      cloudJobId = jobNeedsLibrarianMedia(job.status)
+        ? await handoffLocalFile(
+            authed,
+            {
+              filePath: item.localPath,
+              jobId: item.remoteJobId,
+              videoId,
+              clipLength: item.clipLength,
+            },
+            onLog,
+          )
+        : item.remoteJobId;
+    } else if (item.remoteJobId) {
       const job = await api.getJob(authed, item.remoteJobId);
       const claim = {
         jobId: item.remoteJobId,
         youtubeUrl: item.url,
         clipLength: item.clipLength,
-        videoId: null,
+        videoId: item.videoId ?? job.videoId ?? null,
         kind: job.kind ?? item.kind,
+        ingestKind: item.ingestKind ?? job.ingestKind,
         startSec: item.startSec ?? job.startSec,
         durationSec: item.durationSec ?? job.durationSec,
         title: item.title ?? job.videoTitle ?? undefined,
@@ -213,11 +246,15 @@ export function startHelperLoop(onUpdate: HelperListener): () => void {
           : item.remoteJobId;
       } else if (!jobNeedsLibrarianMedia(job.status)) {
         cloudJobId = item.remoteJobId;
+      } else if (isLocalFileIngest(claim) && !item.localPath) {
+        throw new Error(
+          "This volume was submitted as a file on this computer. Choose the file in Librarian to continue.",
+        );
       } else {
         cloudJobId = await handoffRemoteJob(authed, claim, onLog);
       }
     } else {
-      cloudJobId = await handoffLocalClip(authed, item.url, item.clipLength, onLog);
+      throw new Error("Choose a video file first.");
     }
     void waitForWorker(authed, cloudJobId, onLog)
       .then(async () => {

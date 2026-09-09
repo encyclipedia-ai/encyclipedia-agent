@@ -24,7 +24,7 @@
     "dist:win": "tsc -p tsconfig.json && electron-builder --win --publish never",
     "dist:linux": "tsc -p tsconfig.json && electron-builder --linux --publish never",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "tsx --test test/job-queue.test.ts test/update-gate.test.ts test/release-manifest.test.cjs"
+    "test": "tsx --test test/job-queue.test.ts test/update-gate.test.ts test/release-manifest.test.cjs test/media-file.test.ts test/local-queue.test.ts test/clip-windows.test.ts"
   },
   "engines": {
     "node": ">=20"

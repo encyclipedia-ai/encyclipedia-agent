@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, nativeImage, session } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, session } from "electron";
 import path from "node:path";
 import {
   createGoogleAuthSession,
@@ -8,7 +8,7 @@ import {
 import { loadConfig } from "./config.js";
 import {
   completeGoogleSignIn,
-  queueClip,
+  queueLocalFile,
   restoreSession,
   signIn,
   signOut,
@@ -19,6 +19,7 @@ import {
   initializeUpdater,
   type UpdaterController,
 } from "./updater.js";
+import { LOCAL_VIDEO_EXTENSIONS } from "./media-file.js";
 
 const here = __dirname;
 const ui = (...parts: string[]) => path.join(here, "..", "ui", ...parts);
@@ -277,12 +278,33 @@ ipcMain.handle("helper:sign-out", () => {
   });
 });
 
+ipcMain.handle("helper:pick-clip", async () => {
+  if (!win) throw new Error("Librarian is not ready yet.");
+  const result = await dialog.showOpenDialog(win, {
+    title: "Choose a video to clip",
+    properties: ["openFile"],
+    filters: [
+      {
+        name: "Videos",
+        extensions: [...LOCAL_VIDEO_EXTENSIONS],
+      },
+    ],
+  });
+  if (result.canceled || !result.filePaths[0]) {
+    return { cancelled: true as const };
+  }
+  return { cancelled: false as const, path: result.filePaths[0] };
+});
+
 ipcMain.handle(
-  "helper:clip",
-  async (_evt, body: { url?: string; clipLength?: "short" | "medium" }) => {
-    const url = body.url?.trim() ?? "";
-    if (!url) throw new Error("Paste a YouTube URL first.");
-    const item = await queueClip(url, body.clipLength === "medium" ? "medium" : "short");
+  "helper:clip-file",
+  async (_evt, body: { path?: string; clipLength?: "short" | "medium" }) => {
+    const filePath = body.path?.trim() ?? "";
+    if (!filePath) throw new Error("Choose a video file first.");
+    const item = await queueLocalFile(
+      filePath,
+      body.clipLength === "medium" ? "medium" : "short",
+    );
     return { ok: true, id: item.id };
   },
 );

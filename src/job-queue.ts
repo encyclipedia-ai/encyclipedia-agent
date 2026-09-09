@@ -10,6 +10,8 @@ export type WorkPhase =
   | "done"
   | "error";
 
+export type IngestKind = "local_file";
+
 export interface QueueItem {
   id: string;
   url: string;
@@ -19,6 +21,9 @@ export interface QueueItem {
   clipLength: "short" | "medium";
   remoteJobId?: string;
   cloudJobId?: string;
+  localPath?: string;
+  videoId?: string;
+  ingestKind?: IngestKind;
   startSec?: number;
   durationSec?: number;
   phase: WorkPhase;
@@ -116,6 +121,9 @@ function makeItem(
     kind?: "process" | "recut";
     startSec?: number;
     durationSec?: number;
+    localPath?: string;
+    videoId?: string;
+    ingestKind?: IngestKind;
   },
 ): QueueItem {
   return {
@@ -126,6 +134,9 @@ function makeItem(
     kind: input.kind,
     clipLength: input.clipLength,
     remoteJobId: input.remoteJobId,
+    localPath: input.localPath,
+    videoId: input.videoId,
+    ingestKind: input.ingestKind,
     startSec: input.startSec,
     durationSec: input.durationSec,
     phase: "queued",
@@ -138,7 +149,13 @@ function makeItem(
 export function enqueueLocal(
   url: string,
   clipLength: "short" | "medium",
-  opts?: { remoteJobId?: string },
+  opts?: {
+    remoteJobId?: string;
+    localPath?: string;
+    title?: string;
+    videoId?: string;
+    ingestKind?: IngestKind;
+  },
 ): QueueItem {
   if (opts?.remoteJobId) {
     const existing = items.find(
@@ -154,6 +171,10 @@ export function enqueueLocal(
     clipLength,
     source: "local",
     remoteJobId: opts?.remoteJobId,
+    localPath: opts?.localPath,
+    title: opts?.title ?? null,
+    videoId: opts?.videoId,
+    ingestKind: opts?.ingestKind,
     kind: "process",
   });
   items.push(item);
@@ -170,6 +191,8 @@ export function enqueueRemote(claim: {
   startSec?: number;
   durationSec?: number;
   title?: string;
+  ingestKind?: IngestKind;
+  videoId?: string | null;
 }): QueueItem | null {
   if (items.some((item) => item.remoteJobId === claim.jobId && item.phase !== "done" && item.phase !== "error")) {
     return null;
@@ -183,6 +206,8 @@ export function enqueueRemote(claim: {
     startSec: claim.startSec,
     durationSec: claim.durationSec,
     title: claim.title ?? null,
+    ingestKind: claim.ingestKind,
+    videoId: claim.videoId ?? undefined,
   });
   items.push(item);
   emit();

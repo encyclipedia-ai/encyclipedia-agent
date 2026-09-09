@@ -15,3 +15,10 @@ export const RECUT_WINDOW_MISSING =
 
 export const RECUT_NOT_FULL_VOD =
   "This job is a clip edit, not a full-video download. Restart Librarian from current source (pnpm app).";
+
+export function isLocalFileIngest(claim: {
+  ingestKind?: string | null;
+  youtubeUrl?: string | null;
+}): boolean {
+  return claim.ingestKind === "local_file" || Boolean(claim.youtubeUrl?.startsWith("local://"));
+}
