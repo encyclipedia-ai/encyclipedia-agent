@@ -11,6 +11,22 @@ export class AgentApiError extends Error {
   }
 }
 
+export class JobCancelledError extends Error {
+  constructor() {
+    super("This job was cancelled.");
+    this.name = "JobCancelledError";
+  }
+}
+
+export function isJobCancelledError(err: unknown): boolean {
+  if (err instanceof JobCancelledError) return true;
+  if (err instanceof Error && err.name === "AbortError") return true;
+  if (err instanceof AgentApiError && err.status === 409 && /cancelled/i.test(err.message)) {
+    return true;
+  }
+  return false;
+}
+
 export interface VideoInfo {
   id: string;
   title: string;
@@ -92,7 +108,15 @@ async function request<T>(
   if (init.body && !headers["Content-Type"]) {
     headers["Content-Type"] = "application/json";
   }
-  const res = await fetch(`${authed.apiUrl}${path}`, { ...init, headers });
+  let res: Response;
+  try {
+    res = await fetch(`${authed.apiUrl}${path}`, { ...init, headers });
+  } catch (err) {
+    if (init.signal?.aborted || (err instanceof Error && err.name === "AbortError")) {
+      throw new JobCancelledError();
+    }
+    throw err;
+  }
   if (res.status === 204) return undefined as T;
   const text = await res.text();
   let parsed: unknown = undefined;
@@ -112,6 +136,9 @@ async function request<T>(
       parsed && typeof parsed === "object" && "error" in parsed
         ? String((parsed as { error: unknown }).error)
         : `${init.method ?? "GET"} ${path} failed: ${res.status}`;
+    if (res.status === 409 && /cancelled/i.test(message)) {
+      throw new JobCancelledError();
+    }
     throw new AgentApiError(res.status, message);
   }
   return parsed as T;
@@ -191,6 +218,7 @@ export function transcribeJob(
   cfg: AgentConfig,
   jobId: string,
   body: { bucket: string; objectKey: string },
+  signal?: AbortSignal,
 ) {
   return request<{
     segments: TranscriptSegment[];
@@ -200,6 +228,7 @@ export function transcribeJob(
   }>(cfg, `/api/agent/jobs/${encodeURIComponent(jobId)}/transcribe`, {
     method: "POST",
     body: JSON.stringify(body),
+    signal,
   });
 }
 
@@ -211,6 +240,7 @@ export function analyzeJob(
     clipLength: "short" | "medium";
     videoTitle?: string;
   },
+  signal?: AbortSignal,
 ) {
   return request<ClipPlan>(
     cfg,
@@ -218,6 +248,7 @@ export function analyzeJob(
     {
       method: "POST",
       body: JSON.stringify(body),
+      signal,
     },
   );
 }
@@ -275,6 +306,34 @@ export function getJob(cfg: AgentConfig, jobId: string) {
   }>(cfg, `/api/jobs/${encodeURIComponent(jobId)}`);
 }
 
+/** Poll the cloud job until it is cancelled, then abort in-flight work. */
+export function watchJobCancellation(
+  cfg: AgentConfig,
+  jobId: string,
+): { signal: AbortSignal; stop: () => void } {
+  const ac = new AbortController();
+  let stopped = false;
+  const stop = () => {
+    stopped = true;
+  };
+  void (async () => {
+    while (!stopped) {
+      try {
+        const job = await getJob(cfg, jobId);
+        if (stopped) return;
+        if (job.status === "cancelled") {
+          ac.abort();
+          return;
+        }
+      } catch {
+        if (stopped) return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+  })();
+  return { signal: ac.signal, stop };
+}
+
 export function getStream(cfg: AgentConfig, slug: string) {
   return request<{
     clips: Array<{ filename: string; editVersion?: number }>;
@@ -309,6 +368,7 @@ export function completeJob(
     source: JobSource;
     clipPlan?: ClipPlan;
   },
+  signal?: AbortSignal,
 ) {
   return request<{ jobId: string; status: string }>(
     cfg,
@@ -316,6 +376,7 @@ export function completeJob(
     {
       method: "POST",
       body: JSON.stringify({ ...body, deviceId: cfg.deviceId }),
+      signal,
     },
   );
 }

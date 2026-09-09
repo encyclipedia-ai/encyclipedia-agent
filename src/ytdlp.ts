@@ -19,6 +19,12 @@ class YoutubeBlockedError extends Error {
   }
 }
 
+class YoutubeRateLimitedError extends Error {
+  constructor() {
+    super("YouTube rate-limited this request. Librarian will retry with a browser login.");
+  }
+}
+
 class YoutubeAuthRequiredError extends Error {
   constructor() {
     super(
@@ -64,6 +70,7 @@ type RunOpts = {
   impersonate?: boolean;
   extractorArgs?: string;
   cookiesFromBrowser?: string;
+  signal?: AbortSignal;
 };
 
 interface CookieSource {
@@ -186,11 +193,41 @@ function looksLikeCookieFailure(err: unknown): boolean {
   );
 }
 
+function needsBrowserCookieRetry(err: unknown): boolean {
+  return (
+    err instanceof AgeRestrictedError ||
+    err instanceof YoutubeAuthRequiredError ||
+    err instanceof YoutubeRateLimitedError
+  );
+}
+
+function canRotateCookieSource(err: unknown): boolean {
+  return (
+    needsBrowserCookieRetry(err) ||
+    err instanceof YoutubeBlockedError ||
+    looksLikeCookieFailure(err)
+  );
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function abortError(): Error {
+  const err = new Error("This job was cancelled.");
+  err.name = "AbortError";
+  return err;
+}
+
 function spawnYtdlp(
   argv: string[],
   opts: RunOpts = {},
 ): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
+        if (opts.signal?.aborted) {
+          reject(abortError());
+          return;
+        }
         const tools = toolPaths();
         const child = spawn(
           tools.ytdlp,
@@ -207,6 +244,19 @@ function spawnYtdlp(
           env: ytdlpEnv(),
           stdio: ["ignore", "pipe", "pipe"],
         });
+        let aborted = false;
+        const onAbort = () => {
+          aborted = true;
+          child.kill("SIGTERM");
+          setTimeout(() => {
+            try {
+              child.kill("SIGKILL");
+            } catch {
+              /* already exited */
+            }
+          }, 2000).unref();
+        };
+        opts.signal?.addEventListener("abort", onAbort, { once: true });
         let stdout = "";
         let stderr = "";
         let lineBuf = "";
@@ -247,6 +297,11 @@ function spawnYtdlp(
           );
         });
         child.on("close", (code) => {
+          opts.signal?.removeEventListener("abort", onAbort);
+          if (aborted || opts.signal?.aborted) {
+            reject(abortError());
+            return;
+          }
           if (code === 0) {
             resolve({ stdout, stderr });
             return;
@@ -277,6 +332,10 @@ function spawnYtdlp(
             reject(new FormatUnavailableError(detail));
             return;
           }
+          if (/429|Too Many Requests/i.test(haystack)) {
+            reject(new YoutubeRateLimitedError());
+            return;
+          }
           if (/403|Forbidden/i.test(detail)) {
             reject(new YoutubeBlockedError());
             return;
@@ -298,13 +357,14 @@ async function run(
   argv: string[],
   opts: RunOpts = {},
 ): Promise<{ stdout: string; stderr: string }> {
+  if (opts.signal?.aborted) throw abortError();
   return withDownloaderLock(async () => {
     const tryOnce = (extra: RunOpts = {}) => spawnYtdlp(argv, { ...opts, ...extra });
 
     const retryWithBrowserLogin = async (): Promise<{ stdout: string; stderr: string }> => {
       opts.onProgress?.({
         percent: null,
-        detail: "YouTube requested a sign-in check. Librarian is trying browser logins…",
+        detail: "YouTube blocked this request. Librarian is trying browser logins…",
       });
       const sources = cookieSources();
       for (const source of sources) {
@@ -319,12 +379,7 @@ async function run(
           );
           return result;
         } catch (retryErr) {
-          if (
-            retryErr instanceof AgeRestrictedError ||
-            retryErr instanceof YoutubeAuthRequiredError ||
-            retryErr instanceof YoutubeBlockedError ||
-            looksLikeCookieFailure(retryErr)
-          ) {
+          if (canRotateCookieSource(retryErr)) {
             continue;
           }
           throw retryErr;
@@ -356,10 +411,15 @@ async function run(
         preferredCookieSource = null;
         return retryWithBrowserLogin();
       }
-      if (
-        err instanceof AgeRestrictedError ||
-        err instanceof YoutubeAuthRequiredError
-      ) {
+      if (needsBrowserCookieRetry(err)) {
+        if (err instanceof YoutubeRateLimitedError) {
+          preferredCookieSource = null;
+          opts.onProgress?.({
+            percent: null,
+            detail: "YouTube rate-limited this request. Retrying with a browser login…",
+          });
+          await sleep(2000);
+        }
         try {
           await refreshYtdlpIfNeeded({ force: true });
           return await retryWithBrowserLogin();
@@ -388,12 +448,10 @@ async function run(
             retryErr instanceof YoutubeBlockedError ||
             retryErr instanceof FormatUnavailableError ||
             retryErr instanceof AgeRestrictedError ||
-            retryErr instanceof YoutubeAuthRequiredError
+            retryErr instanceof YoutubeAuthRequiredError ||
+            retryErr instanceof YoutubeRateLimitedError
           ) {
-            if (
-              retryErr instanceof AgeRestrictedError ||
-              retryErr instanceof YoutubeAuthRequiredError
-            ) {
+            if (needsBrowserCookieRetry(retryErr)) {
               try {
                 return await retryWithBrowserLogin();
               } catch {
@@ -416,8 +474,10 @@ async function run(
   });
 }
 
-export async function dumpVideoInfo(url: string): Promise<VideoInfo> {
-  const { stdout } = await run(["--dump-json", "--no-download", "--no-warnings", url]);
+export async function dumpVideoInfo(url: string, signal?: AbortSignal): Promise<VideoInfo> {
+  const { stdout } = await run(["--dump-json", "--no-download", "--no-warnings", url], {
+    signal,
+  });
   const info = JSON.parse(stdout) as {
     id: string;
     title: string;
@@ -574,6 +634,7 @@ export async function downloadSection(
   workDir: string,
   onProgress?: YtdlpProgressFn,
   outputStem = "recut",
+  signal?: AbortSignal,
 ): Promise<string> {
   fs.mkdirSync(workDir, { recursive: true });
   const output = path.join(workDir, `${outputStem}.%(ext)s`);
@@ -594,7 +655,7 @@ export async function downloadSection(
     output,
   ];
 
-  await run([...argv, url], { cwd: workDir, onProgress });
+  await run([...argv, url], { cwd: workDir, onProgress, signal });
 
   const files = fs.readdirSync(workDir);
   const expected = `${outputStem}.mp4`;
@@ -617,6 +678,8 @@ export async function downloadSection(
 export async function downloadCaptions(
   url: string,
   workDir: string,
+  onProgress?: YtdlpProgressFn,
+  signal?: AbortSignal,
 ): Promise<string | null> {
   fs.mkdirSync(workDir, { recursive: true });
   const output = path.join(workDir, "captions");
@@ -635,9 +698,10 @@ export async function downloadCaptions(
         output,
         url,
       ],
-      { cwd: workDir },
+      { cwd: workDir, onProgress, signal },
     );
-  } catch {
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") throw err;
     return null;
   }
   const files = fs.readdirSync(workDir);
@@ -650,6 +714,7 @@ export async function downloadAudio(
   url: string,
   workDir: string,
   onProgress?: YtdlpProgressFn,
+  signal?: AbortSignal,
 ): Promise<string> {
   fs.mkdirSync(workDir, { recursive: true });
   const output = path.join(workDir, "audio.%(ext)s");
@@ -667,7 +732,7 @@ export async function downloadAudio(
       output,
       url,
     ],
-    { cwd: workDir, onProgress },
+    { cwd: workDir, onProgress, signal },
   );
   const files = fs.readdirSync(workDir);
   const audio =
@@ -681,6 +746,7 @@ export async function downloadSource(
   url: string,
   workDir: string,
   onProgress?: YtdlpProgressFn,
+  signal?: AbortSignal,
 ): Promise<{ videoPath: string; captionsPath: string | null }> {
   fs.mkdirSync(workDir, { recursive: true });
   const output = path.join(workDir, "source.%(ext)s");
@@ -713,6 +779,7 @@ export async function downloadSource(
         cwd: workDir,
         onProgress,
         impersonate: attempt.impersonate,
+        signal,
       });
       lastError = null;
       break;

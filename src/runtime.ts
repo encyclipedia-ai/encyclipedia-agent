@@ -3,6 +3,7 @@ import path from "node:path";
 import { clearSession, loadConfig, saveConfig, type AgentConfig } from "./config.js";
 import { ensureFreshToken, signInWithIdp, signInWithPassword } from "./auth.js";
 import * as api from "./api.js";
+import { JobCancelledError, isJobCancelledError } from "./api.js";
 import { isRecutClaim, isLocalFileIngest } from "./claim.js";
 import {
   handoffLocalFile,
@@ -211,6 +212,12 @@ export function startHelperLoop(onUpdate: HelperListener): () => void {
       else report(update);
     };
     let cloudJobId: string;
+    if (item.remoteJobId) {
+      const preview = await api.getJob(authed, item.remoteJobId);
+      if (preview.status === "cancelled") {
+        throw new JobCancelledError();
+      }
+    }
     if (item.localPath && item.remoteJobId) {
       const videoId = item.videoId;
       if (!videoId) throw new Error("The API did not return a video id for this file.");
@@ -276,6 +283,14 @@ export function startHelperLoop(onUpdate: HelperListener): () => void {
         });
       })
       .catch((err) => {
+        if (isJobCancelledError(err) || /cancelled/i.test(err instanceof Error ? err.message : String(err))) {
+          updateQueueItem(item.id, {
+            phase: "cancelled",
+            percent: null,
+            detail: "Cancelled.",
+          });
+          return;
+        }
         const message = err instanceof Error ? err.message : String(err);
         updateQueueItem(item.id, {
           phase: "error",
