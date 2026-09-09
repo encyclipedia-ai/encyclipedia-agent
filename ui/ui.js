@@ -31,6 +31,7 @@ const PHASE_LABEL = {
   render: "Rendering",
   done: "Shelved",
   error: "Could not shelve",
+  cancelled: "Cancelled",
 };
 
 function shortUrl(url) {

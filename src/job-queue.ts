@@ -8,7 +8,8 @@ export type WorkPhase =
   | "upload"
   | "render"
   | "done"
-  | "error";
+  | "error"
+  | "cancelled";
 
 export type IngestKind = "local_file";
 
@@ -48,7 +49,11 @@ export type QueueProcessor = (
 
 const KEEP_FINISHED = 15;
 const MACHINE_PHASES = new Set<WorkPhase>(["lookup", "download", "analyze", "upload"]);
-const TERMINAL_PHASES = new Set<WorkPhase>(["done", "error"]);
+const TERMINAL_PHASES = new Set<WorkPhase>(["done", "error", "cancelled"]);
+
+function isFinishedPhase(phase: WorkPhase): boolean {
+  return TERMINAL_PHASES.has(phase);
+}
 
 let items: QueueItem[] = [];
 let processor: QueueProcessor | null = null;
@@ -71,7 +76,7 @@ function emit(): void {
 }
 
 function trimFinished(): void {
-  const finished = items.filter((item) => item.phase === "done" || item.phase === "error");
+  const finished = items.filter((item) => isFinishedPhase(item.phase));
   if (finished.length <= KEEP_FINISHED) return;
   const drop = new Set(finished.slice(0, finished.length - KEEP_FINISHED).map((item) => item.id));
   items = items.filter((item) => !drop.has(item.id));
@@ -86,7 +91,7 @@ export function updateQueueItem(id: string, patch: QueuePatch): void {
   const prev = lastNotify.get(id) ?? 0;
   if (!phaseChanged && now - prev < 150) return;
   lastNotify.set(id, now);
-  if (patch.phase === "done" || patch.phase === "error") trimFinished();
+  if (patch.phase && isFinishedPhase(patch.phase)) trimFinished();
   emit();
 }
 
@@ -162,7 +167,8 @@ export function enqueueLocal(
       (item) =>
         item.remoteJobId === opts.remoteJobId &&
         item.phase !== "done" &&
-        item.phase !== "error",
+        item.phase !== "error" &&
+        item.phase !== "cancelled",
     );
     if (existing) return existing;
   }
@@ -194,7 +200,7 @@ export function enqueueRemote(claim: {
   ingestKind?: IngestKind;
   videoId?: string | null;
 }): QueueItem | null {
-  if (items.some((item) => item.remoteJobId === claim.jobId && item.phase !== "done" && item.phase !== "error")) {
+  if (items.some((item) => item.remoteJobId === claim.jobId && !isFinishedPhase(item.phase))) {
     return null;
   }
   const item = makeItem({
@@ -216,7 +222,7 @@ export function enqueueRemote(claim: {
 }
 
 export function clearUnfinishedQueue(): void {
-  items = items.filter((item) => item.phase === "done" || item.phase === "error");
+  items = items.filter((item) => isFinishedPhase(item.phase));
   draining = false;
   emit();
 }
@@ -233,7 +239,7 @@ async function drain(): Promise<void> {
       try {
         const result = await processor(next, report);
         const current = items.find((row) => row.id === next.id);
-        if (current && (current.phase === "done" || current.phase === "error")) {
+        if (current && isFinishedPhase(current.phase)) {
           continue;
         }
         if (result?.cloudJobId) {
@@ -251,11 +257,14 @@ async function drain(): Promise<void> {
           });
         }
       } catch (err) {
+        const cancelled =
+          err instanceof Error &&
+          (err.name === "JobCancelledError" || err.name === "AbortError");
         updateQueueItem(next.id, {
-          phase: "error",
+          phase: cancelled ? "cancelled" : "error",
           percent: null,
-          detail: err instanceof Error ? err.message : String(err),
-          error: err instanceof Error ? err.message : String(err),
+          detail: cancelled ? "Cancelled." : err instanceof Error ? err.message : String(err),
+          error: cancelled ? undefined : err instanceof Error ? err.message : String(err),
         });
       }
     }

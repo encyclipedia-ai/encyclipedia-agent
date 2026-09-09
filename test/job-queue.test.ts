@@ -5,6 +5,7 @@ import { enqueueLocal, getQueue, queueIsIdle, type WorkPhase } from "../src/job-
 test("queue is idle when it is empty or all jobs are terminal", () => {
   assert.equal(queueIsIdle([], false), true);
   assert.equal(queueIsIdle([{ phase: "done" }, { phase: "error" }], false), true);
+  assert.equal(queueIsIdle([{ phase: "cancelled" }], false), true);
 });
 
 test("every unfinished phase blocks an update restart", () => {

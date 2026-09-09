@@ -9,6 +9,7 @@ export async function putFile(
   target: UploadTarget,
   filePath: string,
   onProgress?: UploadProgressFn,
+  signal?: AbortSignal,
 ): Promise<void> {
   const total = statSync(filePath).size;
   let sent = 0;
@@ -31,7 +32,13 @@ export async function putFile(
     headers: target.headers,
     body: Readable.toWeb(nodeStream) as unknown as BodyInit,
     duplex: "half",
+    signal,
   } as RequestInit);
+  if (signal?.aborted) {
+    const err = new Error("This job was cancelled.");
+    err.name = "AbortError";
+    throw err;
+  }
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new Error(`upload failed ${res.status}: ${text.slice(0, 300)}`);

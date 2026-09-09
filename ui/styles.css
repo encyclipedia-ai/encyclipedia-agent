@@ -463,7 +463,9 @@ button.ghost:hover:not(:disabled) {
 }
 
 .queue-item.phase-error .queue-phase,
-.queue-item.phase-error .queue-detail {
+.queue-item.phase-error .queue-detail,
+.queue-item.phase-cancelled .queue-phase,
+.queue-item.phase-cancelled .queue-detail {
   color: var(--bad);
 }
 
