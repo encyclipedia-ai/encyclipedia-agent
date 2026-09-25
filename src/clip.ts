@@ -394,9 +394,17 @@ export async function waitForWorker(
   onLog?: LogFn,
 ): Promise<void> {
   say(onLog, "Renderer is preparing clips…", { phase: "render", percent: null });
+  let lastLogged: string | undefined;
   while (true) {
     const job = await api.getJob(cfg, jobId);
-    say(onLog, job.progress || job.status, { phase: "render" });
+    const line = job.progress || job.status;
+    // Progress is a single Firestore field overwritten in place. Polling every
+    // 3s without dedupe reprints the same Scene/autocrop line forever when the
+    // worker stalls or dies mid-render.
+    if (line !== lastLogged) {
+      say(onLog, line, { phase: "render" });
+      lastLogged = line;
+    }
     if (TERMINAL.has(job.status)) {
       if (job.status === "done") {
         say(onLog, "Done. Clips are in your encyclipedia stacks.", {
