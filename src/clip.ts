@@ -4,22 +4,19 @@ import path from "node:path";
 import type { AgentConfig } from "./config.js";
 import * as api from "./api.js";
 import { AgentApiError, JobCancelledError, isJobCancelledError } from "./api.js";
-import { parseJson3Captions } from "./captions.js";
+import { analysisChunkRanges } from "./analysis-chunks.js";
 import type { QueuePatch } from "./job-queue.js";
 import { isRecutClaim, isLocalFileIngest, RECUT_NOT_FULL_VOD, RECUT_WINDOW_MISSING } from "./claim.js";
 import {
   assertReadableVideo,
   cutMediaSection,
   downloadToFile,
-  extractAudioMp3,
   prepareSourceMp4,
   probeMediaFile,
 } from "./media-file.js";
 import { paddedClipWindow } from "./clip-windows.js";
 import { putFile } from "./upload.js";
 import {
-  downloadAudio,
-  downloadCaptions,
   downloadSection,
   downloadSource,
   dumpVideoInfo,
@@ -71,37 +68,17 @@ export async function ingestSource(
   sweepDownloadTemps();
   const workDir = await fs.mkdtemp(path.join(os.tmpdir(), "encyclipedia-agent-"));
   try {
-    say(onLog, "Checking captions…", { phase: "download", percent: null });
-    const captionsPath = await downloadCaptions(
+    const chunks = await uploadYoutubeAnalysisChunks(
+      cfg,
       url,
+      video,
       workDir,
-      (update) => {
-        onLog?.({
-          phase: "download",
-          percent: update.percent,
-          detail: update.detail,
-        });
-      },
+      onLog,
       opts.signal,
     );
-    const segments = captionsPath
-      ? await segmentsFromCaptions(captionsPath, onLog)
-      : null;
-    const transcript =
-      segments && segments.length > 0
-        ? { segments }
-        : await transcribeFromYoutubeAudio(
-            cfg,
-            url,
-            video.id,
-            opts.jobId,
-            workDir,
-            onLog,
-            opts.signal,
-          );
-    const clipPlan = await analyzeSegments(
+    const clipPlan = await analyzeChunks(
       cfg,
-      transcript.segments,
+      chunks,
       video,
       opts.clipLength,
       opts.jobId,
@@ -127,106 +104,146 @@ export async function ingestSource(
   }
 }
 
-async function segmentsFromCaptions(
-  captionsPath: string,
-  onLog?: LogFn,
-): Promise<api.TranscriptSegment[] | null> {
-  try {
-    const raw = await fs.readFile(captionsPath, "utf8");
-    const segments = parseJson3Captions(raw);
-    if (segments.length === 0) {
-      say(onLog, "Captions were empty. Librarian will transcribe the audio instead.");
-      return null;
-    }
-    return segments;
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    say(onLog, `Captions could not be parsed (${message}). Librarian will transcribe the audio instead.`);
-    return null;
-  }
-}
-
-async function transcribeFromYoutubeAudio(
+async function uploadYoutubeAnalysisChunks(
   cfg: AgentConfig,
   url: string,
-  videoId: string,
-  jobId: string,
+  video: api.VideoInfo,
   workDir: string,
   onLog?: LogFn,
   signal?: AbortSignal,
-): Promise<{ segments: api.TranscriptSegment[] }> {
-  say(onLog, "No captions found. Downloading audio to transcribe…", {
-    phase: "download",
-    percent: 0,
-  });
-  const audioPath = await downloadAudio(
-    url,
-    workDir,
-    (update) => {
-      onLog?.({
-        phase: "download",
-        percent: update.percent,
-        detail: update.detail,
-      });
-    },
-    signal,
-  );
-  return uploadAudioAndTranscribe(cfg, videoId, jobId, audioPath, onLog, signal);
+): Promise<api.AnalysisChunk[]> {
+  const ranges = analysisChunkRanges(video.duration);
+  let localSource: string | undefined;
+  return uploadAnalysisChunkFiles(cfg, video.id, ranges, async (range, index) => {
+    if (localSource) {
+      const cutPath = path.join(workDir, `chunk_${index}.mp4`);
+      await cutMediaSection(localSource, range.startSec, range.durationSec, cutPath);
+      return cutPath;
+    }
+    try {
+      return await downloadSection(
+        url,
+        range.startSec,
+        range.durationSec,
+        workDir,
+        (update) => {
+          onLog?.({
+            phase: "download",
+            percent: update.percent,
+            detail: update.detail,
+          });
+        },
+        `chunk_${index}`,
+        signal,
+      );
+    } catch (err) {
+      if (isJobCancelledError(err)) throw err;
+      const message = err instanceof Error ? err.message : String(err);
+      say(
+        onLog,
+        `Section download failed (${message}). Downloading locally to cut 30-minute chunks — the full file stays on this computer.`,
+      );
+      if (!localSource) {
+        const downloaded = await downloadSource(
+          url,
+          workDir,
+          (update) => {
+            onLog?.({
+              phase: "download",
+              percent: update.percent,
+              detail: update.detail,
+            });
+          },
+          signal,
+        );
+        localSource = downloaded.videoPath;
+      }
+      const cutPath = path.join(workDir, `chunk_${index}.mp4`);
+      await cutMediaSection(localSource, range.startSec, range.durationSec, cutPath);
+      return cutPath;
+    }
+  }, onLog, signal);
 }
 
-async function uploadAudioAndTranscribe(
+async function uploadLocalAnalysisChunks(
   cfg: AgentConfig,
   videoId: string,
-  jobId: string,
-  audioPath: string,
+  sourcePath: string,
+  durationSec: number,
+  workDir: string,
   onLog?: LogFn,
   signal?: AbortSignal,
-): Promise<{ segments: api.TranscriptSegment[] }> {
-  say(onLog, "Uploading audio for transcription…", { phase: "upload", percent: 0 });
-  const target = await api.requestUploadUrl(cfg, videoId, "audio", "audio/mpeg");
-  await putFile(
-    target,
-    audioPath,
-    (percent, sent, total) => {
-      onLog?.({
-        phase: "upload",
-        percent,
-        detail: `Uploading audio ${percent}% · ${formatBytes(sent)} of ${formatBytes(total)}`,
-      });
-    },
-    signal,
-  );
-  say(onLog, "Transcribing speech…", { phase: "analyze", percent: null });
-  const result = await api.transcribeJob(
-    cfg,
-    jobId,
-    {
-      bucket: target.bucket,
-      objectKey: target.objectKey,
-    },
-    signal,
-  );
-  if (result.segments.length === 0) {
-    throw new Error("Transcription produced no speech. Try another file.");
-  }
-  return { segments: result.segments };
+): Promise<api.AnalysisChunk[]> {
+  const ranges = analysisChunkRanges(durationSec);
+  return uploadAnalysisChunkFiles(cfg, videoId, ranges, async (range, index) => {
+    const cutPath = path.join(workDir, `chunk_${index}.mp4`);
+    await cutMediaSection(sourcePath, range.startSec, range.durationSec, cutPath);
+    return cutPath;
+  }, onLog, signal);
 }
 
-async function analyzeSegments(
+async function uploadAnalysisChunkFiles(
   cfg: AgentConfig,
-  segments: api.TranscriptSegment[],
+  videoId: string,
+  ranges: Array<{ startSec: number; durationSec: number }>,
+  materialize: (
+    range: { startSec: number; durationSec: number },
+    index: number,
+  ) => Promise<string>,
+  onLog?: LogFn,
+  signal?: AbortSignal,
+): Promise<api.AnalysisChunk[]> {
+  const chunks: api.AnalysisChunk[] = [];
+  for (const [index, range] of ranges.entries()) {
+    const startMin = Math.floor(range.startSec / 60);
+    const endMin = Math.ceil((range.startSec + range.durationSec) / 60);
+    say(onLog, `Preparing minutes ${startMin}–${endMin}…`, {
+      phase: "download",
+      percent: 0,
+    });
+    const videoPath = await materialize(range, index);
+    say(onLog, `Uploading minutes ${startMin}–${endMin} for Gemini…`, {
+      phase: "upload",
+      percent: 0,
+    });
+    const target = await api.requestUploadUrl(cfg, videoId, "chunk", "video/mp4", index);
+    await putFile(
+      target,
+      videoPath,
+      (percent, sent, total) => {
+        onLog?.({
+          phase: "upload",
+          percent,
+          detail: `Uploading minutes ${startMin}–${endMin} · ${percent}% · ${formatBytes(sent)} of ${formatBytes(total)}`,
+        });
+      },
+      signal,
+    );
+    chunks.push({
+      bucket: target.bucket,
+      objectKey: target.objectKey,
+      startSec: range.startSec,
+      durationSec: range.durationSec,
+    });
+  }
+  return chunks;
+}
+
+async function analyzeChunks(
+  cfg: AgentConfig,
+  chunks: api.AnalysisChunk[],
   video: api.VideoInfo,
   clipLength: "short" | "medium",
   jobId: string,
   onLog?: LogFn,
   signal?: AbortSignal,
 ): Promise<api.ClipPlan> {
-  say(onLog, "Scanning for viral moments…", { phase: "analyze", percent: null });
+  say(onLog, "Watching the video for viral moments…", { phase: "analyze", percent: null });
   const plan = await api.analyzeJob(
     cfg,
     jobId,
     {
-      segments,
+      chunks,
       clipLength,
       videoTitle: video.title,
     },
@@ -235,11 +252,14 @@ async function analyzeSegments(
   if (plan.clips.length === 0) {
     throw new Error("No clip-worthy moments were found in this video.");
   }
+  const grouped = plan.categories?.length
+    ? plan.categories.length
+    : new Set(plan.clips.map((clip) => clip.category).filter(Boolean)).size;
   say(
     onLog,
     plan.clips.length === 1
       ? "Found 1 viral moment"
-      : `Found ${plan.clips.length} viral moments`,
+      : `Found ${plan.clips.length} viral moments in ${grouped} highlight${grouped === 1 ? "" : "s"}`,
     { phase: "analyze" },
   );
   return plan;
@@ -464,20 +484,18 @@ export async function handoffLocalFile(
       channelUrl: opts.source?.channelUrl || "",
       channelAvatar: opts.source?.channelAvatar ?? null,
     };
-    say(onLog, "Extracting audio…", { phase: "download", percent: null });
-    const audioPath = path.join(workDir, "audio.mp3");
-    await extractAudioMp3(prepared.videoPath, audioPath);
-    const { segments } = await uploadAudioAndTranscribe(
+    const chunks = await uploadLocalAnalysisChunks(
       cfg,
       videoId,
-      jobId,
-      audioPath,
+      prepared.videoPath,
+      probed.duration,
+      workDir,
       onLog,
       watch.signal,
     );
-    const clipPlan = await analyzeSegments(
+    const clipPlan = await analyzeChunks(
       cfg,
-      segments,
+      chunks,
       video,
       opts.clipLength,
       jobId,
