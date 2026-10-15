@@ -1,5 +1,23 @@
 import type { AgentConfig } from "./config.js";
 import { ensureFreshToken } from "./auth.js";
+import {
+  Agent,
+  fetch as undiciFetch,
+  type Dispatcher,
+  type RequestInit as UndiciRequestInit,
+} from "undici";
+
+/** Outlast the API's 60-minute Cloud Run request limit for Gemini analysis. */
+export const ANALYSIS_REQUEST_TIMEOUT_MS = 65 * 60 * 1000;
+
+const analysisDispatcher = new Agent({
+  headersTimeout: ANALYSIS_REQUEST_TIMEOUT_MS,
+  bodyTimeout: ANALYSIS_REQUEST_TIMEOUT_MS,
+});
+
+type AgentRequestInit = RequestInit & {
+  dispatcher?: Dispatcher;
+};
 
 export class AgentApiError extends Error {
   constructor(
@@ -104,10 +122,11 @@ export interface JobSource {
 async function request<T>(
   cfg: AgentConfig,
   path: string,
-  init: RequestInit = {},
+  init: AgentRequestInit = {},
   retried = false,
 ): Promise<T> {
   let authed = await ensureFreshToken(cfg);
+  const { dispatcher, ...fetchInit } = init;
   const headers: Record<string, string> = {
     Accept: "application/json",
     ...(init.headers as Record<string, string> | undefined),
@@ -118,7 +137,13 @@ async function request<T>(
   }
   let res: Response;
   try {
-    res = await fetch(`${authed.apiUrl}${path}`, { ...init, headers });
+    res = dispatcher
+      ? await undiciFetch(`${authed.apiUrl}${path}`, {
+          ...fetchInit,
+          headers,
+          dispatcher,
+        } as UndiciRequestInit) as unknown as Response
+      : await fetch(`${authed.apiUrl}${path}`, { ...fetchInit, headers });
   } catch (err) {
     if (init.signal?.aborted || (err instanceof Error && err.name === "AbortError")) {
       throw new JobCancelledError();
@@ -239,6 +264,7 @@ export function analyzeJob(
       method: "POST",
       body: JSON.stringify(body),
       signal,
+      dispatcher: analysisDispatcher,
     },
   );
 }

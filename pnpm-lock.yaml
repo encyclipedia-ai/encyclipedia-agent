@@ -11,6 +11,9 @@ importers:
       electron-updater:
         specifier: ^6.8.9
         version: 6.8.9
+      undici:
+        specifier: ^6.21.3
+        version: 6.28.0
     devDependencies:
       '@electron/notarize':
         specifier: ^3.1.1

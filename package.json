@@ -76,7 +76,8 @@
     }
   },
   "dependencies": {
-    "electron-updater": "^6.8.9"
+    "electron-updater": "^6.8.9",
+    "undici": "^6.21.3"
   },
   "devDependencies": {
     "@electron/notarize": "^3.1.1",
