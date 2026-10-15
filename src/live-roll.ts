@@ -1,10 +1,9 @@
 /**
  * Rolling live-capture sessions.
  *
- * YouTube DASH can seek a closed window behind the live edge, so chunks
- * overlap by a few seconds and can catch up after other work. Twitch and
- * Kick only expose a short HLS window, so those chunks record forward from
- * the live edge and do not seek back to the start of the broadcast.
+ * One broadcast is recorded at a time. YouTube wins when it is live, because
+ * its DASH window can be seeked. Twitch is next, then Kick. Those two record
+ * forward from the live edge, since their playlists cannot seek.
  */
 
 export const LIVE_POLL_MS = 60_000;
@@ -86,6 +85,9 @@ function sessionKey(platform: LivePlatform, videoId: string): string {
   return `${platform}:${videoId}`;
 }
 
+/** YouTube first so a multi-cast still captures the seekable stream. */
+const PLATFORM_PRIORITY: LivePlatform[] = ["youtube", "twitch", "kick"];
+
 export class LiveRoll {
   private sessions = new Map<string, Session>();
   private inFlight: string | null = null;
@@ -133,21 +135,28 @@ export class LiveRoll {
     if (this.inFlight && !this.sessions.has(this.inFlight)) this.inFlight = null;
   }
 
-  /** One chunk at a time. Null when nothing is far enough behind the live edge. */
+  /** One platform, one chunk. Null when that broadcast has no window ready. */
   nextChunk(nowMs: number): LiveCapturePlan | null {
     if (this.inFlight) return null;
-    const nowSec = Math.floor(nowMs / 1000);
-    for (const session of this.sessions.values()) {
-      if (nowMs < (this.cooldownUntil.get(session.sessionKey) ?? 0)) continue;
-      const plan = this.planFor(session, nowSec);
-      if (!plan) continue;
-      this.inFlight = session.sessionKey;
-      if (plan.mode === "dash" && plan.endSec != null) {
-        session.coveredUntilSec = advanceCoveredUntil(plan.endSec);
-      } else {
-        session.edgeIndex += 1;
+    const session = this.preferred();
+    if (!session) return null;
+    if (nowMs < (this.cooldownUntil.get(session.sessionKey) ?? 0)) return null;
+    const plan = this.planFor(session, Math.floor(nowMs / 1000));
+    if (!plan) return null;
+    this.inFlight = session.sessionKey;
+    if (plan.mode === "dash" && plan.endSec != null) {
+      session.coveredUntilSec = advanceCoveredUntil(plan.endSec);
+    } else {
+      session.edgeIndex += 1;
+    }
+    return plan;
+  }
+
+  private preferred(): Session | null {
+    for (const platform of PLATFORM_PRIORITY) {
+      for (const session of this.sessions.values()) {
+        if (session.platform === platform) return session;
       }
-      return plan;
     }
     return null;
   }

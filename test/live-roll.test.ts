@@ -106,4 +106,73 @@ describe("LiveRoll", () => {
     roll.observe([profile({ platform: "kick", check: "failed", live: null })]);
     assert.equal(roll.nextChunk(Date.now()), null);
   });
+
+  it("records only YouTube when every platform is live", () => {
+    const roll = new LiveRoll();
+    const startedAt = 1_000;
+    const readyAt = (startedAt + LIVE_EDGE_LAG_SEC + LIVE_CHUNK_SEC) * 1000;
+    roll.observe([
+      profile({ platform: "kick" }),
+      profile({ platform: "twitch" }),
+      profile({
+        platform: "youtube",
+        live: {
+          status: "is_live",
+          streamUrl: "https://www.youtube.com/watch?v=abcdefghijk",
+          videoId: "abcdefghijk",
+          title: "Show",
+          startedAt,
+        },
+      }),
+    ]);
+    const first = roll.nextChunk(readyAt);
+    assert.equal(first?.platform, "youtube");
+    roll.complete(first!);
+    assert.equal(roll.nextChunk((startedAt + 10_000) * 1000)?.platform, "youtube");
+  });
+
+  it("waits for a YouTube window instead of recording another live platform", () => {
+    const roll = new LiveRoll();
+    const startedAt = 1_000;
+    roll.observe([
+      profile({ platform: "twitch" }),
+      profile({
+        platform: "youtube",
+        live: {
+          status: "is_live",
+          streamUrl: "https://www.youtube.com/watch?v=abcdefghijk",
+          videoId: "abcdefghijk",
+          title: "Show",
+          startedAt,
+        },
+      }),
+    ]);
+    assert.equal(roll.nextChunk((startedAt + 10) * 1000), null);
+  });
+
+  it("uses Twitch only while YouTube is offline, then switches after the current chunk", () => {
+    const roll = new LiveRoll();
+    const startedAt = 1_000;
+    const readyAt = (startedAt + LIVE_EDGE_LAG_SEC + LIVE_CHUNK_SEC) * 1000;
+    roll.observe([profile({ platform: "kick" }), profile({ platform: "twitch" })]);
+    const twitch = roll.nextChunk(readyAt);
+    assert.equal(twitch?.platform, "twitch");
+    roll.observe([
+      profile({ platform: "kick" }),
+      profile({ platform: "twitch" }),
+      profile({
+        platform: "youtube",
+        live: {
+          status: "is_live",
+          streamUrl: "https://www.youtube.com/watch?v=abcdefghijk",
+          videoId: "abcdefghijk",
+          title: "Show",
+          startedAt,
+        },
+      }),
+    ]);
+    assert.equal(roll.nextChunk(readyAt), null);
+    roll.complete(twitch!);
+    assert.equal(roll.nextChunk(readyAt)?.platform, "youtube");
+  });
 });
