@@ -11,7 +11,26 @@ export type WorkPhase =
   | "error"
   | "cancelled";
 
-export type IngestKind = "local_file";
+export type IngestKind = "local_file" | "live_chunk";
+
+export interface LiveCapture {
+  mode: "dash" | "edge";
+  platform: "youtube" | "twitch" | "kick";
+  streamUrl: string;
+  sessionId: string;
+  sessionKey: string;
+  startSec: number;
+  endSec?: number;
+  durationSec?: number;
+  channelId: string;
+  channelName: string;
+  channelUrl: string;
+  title: string;
+  /** Set when this chunk was opened by the rolling session, so a failure can rewind it. */
+  rollOwned?: boolean;
+  rewindCoveredUntil?: number;
+  rewindEdgeIndex?: number;
+}
 
 export interface QueueItem {
   id: string;
@@ -25,6 +44,7 @@ export interface QueueItem {
   localPath?: string;
   videoId?: string;
   ingestKind?: IngestKind;
+  liveCapture?: LiveCapture;
   startSec?: number;
   durationSec?: number;
   phase: WorkPhase;
@@ -129,6 +149,7 @@ function makeItem(
     localPath?: string;
     videoId?: string;
     ingestKind?: IngestKind;
+    liveCapture?: LiveCapture;
   },
 ): QueueItem {
   return {
@@ -142,6 +163,7 @@ function makeItem(
     localPath: input.localPath,
     videoId: input.videoId,
     ingestKind: input.ingestKind,
+    liveCapture: input.liveCapture,
     startSec: input.startSec,
     durationSec: input.durationSec,
     phase: "queued",
@@ -160,6 +182,7 @@ export function enqueueLocal(
     title?: string;
     videoId?: string;
     ingestKind?: IngestKind;
+    liveCapture?: LiveCapture;
   },
 ): QueueItem {
   if (opts?.remoteJobId) {
@@ -181,6 +204,7 @@ export function enqueueLocal(
     title: opts?.title ?? null,
     videoId: opts?.videoId,
     ingestKind: opts?.ingestKind,
+    liveCapture: opts?.liveCapture,
     kind: "process",
   });
   items.push(item);
@@ -199,6 +223,7 @@ export function enqueueRemote(claim: {
   title?: string;
   ingestKind?: IngestKind;
   videoId?: string | null;
+  liveCapture?: LiveCapture;
 }): QueueItem | null {
   if (items.some((item) => item.remoteJobId === claim.jobId && !isFinishedPhase(item.phase))) {
     return null;
@@ -214,6 +239,7 @@ export function enqueueRemote(claim: {
     title: claim.title ?? null,
     ingestKind: claim.ingestKind,
     videoId: claim.videoId ?? undefined,
+    liveCapture: claim.liveCapture,
   });
   items.push(item);
   emit();

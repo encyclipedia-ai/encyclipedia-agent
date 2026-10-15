@@ -674,6 +674,107 @@ export async function downloadSection(
   return path.join(workDir, video);
 }
 
+/**
+ * Download a closed DASH window from a YouTube livestream.
+ * Times are seconds from the start of the broadcast and must already be
+ * behind the live edge. Falls back to the caller if yt-dlp cannot seek.
+ */
+export async function downloadLiveDashWindow(
+  url: string,
+  fromSec: number,
+  toSec: number,
+  workDir: string,
+  onProgress?: YtdlpProgressFn,
+  signal?: AbortSignal,
+): Promise<string> {
+  if (toSec <= fromSec) {
+    throw new Error(`invalid live window: ${fromSec}-${toSec}`);
+  }
+  fs.mkdirSync(workDir, { recursive: true });
+  const outputStem = "live-window";
+  const output = path.join(workDir, `${outputStem}.%(ext)s`);
+  const section = `*${formatSectionTime(fromSec)}-${formatSectionTime(toSec)}`;
+  await run(
+    [
+      "--newline",
+      "--no-playlist",
+      "--no-part",
+      "--live-from-start",
+      "--download-sections",
+      section,
+      "-f",
+      recutYoutubeFormat(),
+      "--merge-output-format",
+      "mp4",
+      "--output",
+      output,
+      url,
+    ],
+    { cwd: workDir, onProgress, signal },
+  );
+  return takeProducedMp4(workDir, outputStem, onProgress);
+}
+
+/**
+ * Record `durationSec` of the current live edge. Used for Twitch and Kick,
+ * whose HLS playlists cannot seek back to the start of the broadcast.
+ */
+export async function recordLiveEdge(
+  url: string,
+  durationSec: number,
+  workDir: string,
+  onProgress?: YtdlpProgressFn,
+  signal?: AbortSignal,
+): Promise<string> {
+  const seconds = Math.max(1, Math.floor(durationSec));
+  fs.mkdirSync(workDir, { recursive: true });
+  const outputStem = "live-edge";
+  const output = path.join(workDir, `${outputStem}.%(ext)s`);
+  await run(
+    [
+      "--newline",
+      "--no-playlist",
+      "--no-part",
+      "--downloader",
+      "ffmpeg",
+      "--downloader-args",
+      `ffmpeg:-t ${seconds}`,
+      "-f",
+      recutYoutubeFormat(),
+      "--merge-output-format",
+      "mp4",
+      "--output",
+      output,
+      url,
+    ],
+    { cwd: workDir, onProgress, signal },
+  );
+  return takeProducedMp4(workDir, outputStem, onProgress);
+}
+
+async function takeProducedMp4(
+  workDir: string,
+  outputStem: string,
+  onProgress?: YtdlpProgressFn,
+): Promise<string> {
+  const files = fs.readdirSync(workDir);
+  const expected = `${outputStem}.mp4`;
+  let video =
+    files.find((f) => f === expected) ??
+    files.find((f) => f.startsWith(`${outputStem}.`) && f.endsWith(".mp4"));
+  if (!video) {
+    const other = files.find(
+      (f) => f.startsWith(`${outputStem}.`) && /\.(mkv|webm|mov)$/i.test(f),
+    );
+    if (!other) throw new Error("yt-dlp finished but no clip file was produced");
+    onProgress?.({ percent: 100, detail: "Converting to mp4…" });
+    const dest = path.join(workDir, expected);
+    await remuxToMp4(path.join(workDir, other), dest);
+    video = expected;
+  }
+  return path.join(workDir, video);
+}
+
 /** Fetch English captions without downloading the VOD. */
 export async function downloadCaptions(
   url: string,

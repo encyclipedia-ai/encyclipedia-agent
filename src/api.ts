@@ -253,10 +253,44 @@ export function analyzeJob(
   );
 }
 
+export type LivePlatform = "youtube" | "twitch" | "kick";
+
+export interface LiveBroadcast {
+  status: "is_live";
+  streamUrl: string;
+  videoId: string;
+  title: string;
+  startedAt: number | null;
+}
+
+export interface LiveProfile {
+  platform: LivePlatform;
+  connection: "connected" | "not_connected";
+  platformUserId: string | null;
+  handle: string | null;
+  displayName: string | null;
+  profileUrl: string | null;
+  live: LiveBroadcast | null;
+  check: "ok" | "failed";
+}
+
+export interface LiveChunkRequest {
+  sessionId?: string;
+  startSec: number;
+  endSec?: number;
+  durationSec?: number;
+  mode?: "dash" | "edge";
+  title?: string;
+}
+
+export function liveStatus(cfg: AgentConfig) {
+  return request<{ profiles: LiveProfile[] }>(cfg, "/api/agent/live");
+}
+
 export function submitProcess(
   cfg: AgentConfig,
   body:
-    | { url: string; clipLength: "short" | "medium" }
+    | { url: string; clipLength: "short" | "medium"; liveChunk?: LiveChunkRequest }
     | { localFile: { displayName: string }; clipLength: "short" | "medium" },
 ) {
   return request<{ jobId: string; status: string; deduped?: boolean; videoId?: string }>(
@@ -346,10 +380,19 @@ export interface ClaimedJob {
   clipLength: "short" | "medium";
   videoId: string | null;
   kind?: "process" | "recut";
-  ingestKind?: "local_file";
+  ingestKind?: "local_file" | "live_chunk";
   startSec?: number;
   durationSec?: number;
   title?: string;
+  platform?: LivePlatform;
+  captureMode?: "dash" | "edge";
+  liveChunkStartSec?: number;
+  liveChunkEndSec?: number;
+  liveChunkDurationSec?: number;
+  channelId?: string;
+  channelName?: string;
+  channelUrl?: string;
+  sourceVideoId?: string;
 }
 
 export async function claimJob(cfg: AgentConfig): Promise<ClaimedJob | null> {

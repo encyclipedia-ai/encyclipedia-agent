@@ -36,6 +36,7 @@ let last: HelperSnapshot = {
   message: "Opening the stacks…",
   busy: false,
   queue: [],
+  live: [],
 };
 let googleSignInOpen = false;
 let signInInProgress = false;
@@ -45,8 +46,17 @@ function send(channel: string, payload: unknown): void {
   win?.webContents.send(channel, payload);
 }
 
-function emit(snap: Omit<HelperSnapshot, "queue"> & { queue?: HelperSnapshot["queue"] }): void {
-  last = { ...snap, queue: snap.queue ?? last.queue };
+function emit(
+  snap: Omit<HelperSnapshot, "queue" | "live"> & {
+    queue?: HelperSnapshot["queue"];
+    live?: HelperSnapshot["live"];
+  },
+): void {
+  last = {
+    ...snap,
+    queue: snap.queue ?? last.queue,
+    live: snap.live ?? last.live,
+  };
   send("helper:state", last);
 }
 

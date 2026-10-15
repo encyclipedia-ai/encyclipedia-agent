@@ -428,12 +428,19 @@ export async function handoffLocalFile(
     jobId: string;
     videoId: string;
     clipLength: "short" | "medium";
+    source?: {
+      title?: string;
+      channelId: string;
+      channelName: string;
+      channelUrl: string;
+      channelAvatar?: string | null;
+    };
   },
   onLog?: LogFn,
 ): Promise<string> {
   const { filePath, jobId, videoId } = opts;
   await assertReadableVideo(filePath);
-  const title = path.basename(filePath);
+  const title = opts.source?.title?.trim() || path.basename(filePath);
   say(onLog, `Reading ${title}…`, { title, phase: "lookup", percent: null });
   const probed = await probeMediaFile(filePath);
   const job = await api.getJob(cfg, jobId);
@@ -452,10 +459,10 @@ export async function handoffLocalFile(
       title,
       duration: probed.duration,
       thumbnail: "",
-      channelId: "local",
-      channelName: "Uploaded from Librarian",
-      channelUrl: "",
-      channelAvatar: null,
+      channelId: opts.source?.channelId || "local",
+      channelName: opts.source?.channelName || "Uploaded from Librarian",
+      channelUrl: opts.source?.channelUrl || "",
+      channelAvatar: opts.source?.channelAvatar ?? null,
     };
     say(onLog, "Extracting audio…", { phase: "download", percent: null });
     const audioPath = path.join(workDir, "audio.mp3");
