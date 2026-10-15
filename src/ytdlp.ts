@@ -506,12 +506,6 @@ function commonDownloadArgs(output: string): string[] {
   return [
     "--newline",
     "--no-playlist",
-    "--write-subs",
-    "--write-auto-subs",
-    "--sub-format",
-    "json3",
-    "--sub-langs",
-    "en.*,en",
     "--no-part",
     "--output",
     output,
@@ -674,80 +668,12 @@ export async function downloadSection(
   return path.join(workDir, video);
 }
 
-/** Fetch English captions without downloading the VOD. */
-export async function downloadCaptions(
-  url: string,
-  workDir: string,
-  onProgress?: YtdlpProgressFn,
-  signal?: AbortSignal,
-): Promise<string | null> {
-  fs.mkdirSync(workDir, { recursive: true });
-  const output = path.join(workDir, "captions");
-  try {
-    await run(
-      [
-        "--skip-download",
-        "--write-subs",
-        "--write-auto-subs",
-        "--sub-format",
-        "json3",
-        "--sub-langs",
-        "en.*,en",
-        "--no-playlist",
-        "--output",
-        output,
-        url,
-      ],
-      { cwd: workDir, onProgress, signal },
-    );
-  } catch (err) {
-    if (err instanceof Error && err.name === "AbortError") throw err;
-    return null;
-  }
-  const files = fs.readdirSync(workDir);
-  const captions = files.find((f) => f.endsWith(".json3")) ?? null;
-  return captions ? path.join(workDir, captions) : null;
-}
-
-/** Audio-only download for Whisper when captions are missing. */
-export async function downloadAudio(
-  url: string,
-  workDir: string,
-  onProgress?: YtdlpProgressFn,
-  signal?: AbortSignal,
-): Promise<string> {
-  fs.mkdirSync(workDir, { recursive: true });
-  const output = path.join(workDir, "audio.%(ext)s");
-  await run(
-    [
-      "--newline",
-      "--no-playlist",
-      "--no-part",
-      "-x",
-      "--audio-format",
-      "mp3",
-      "--audio-quality",
-      "7",
-      "--output",
-      output,
-      url,
-    ],
-    { cwd: workDir, onProgress, signal },
-  );
-  const files = fs.readdirSync(workDir);
-  const audio =
-    files.find((f) => f === "audio.mp3") ??
-    files.find((f) => /^audio\./i.test(f) && /\.(mp3|m4a|opus|webm)$/i.test(f));
-  if (!audio) throw new Error("yt-dlp finished but no audio file was produced");
-  return path.join(workDir, audio);
-}
-
 export async function downloadSource(
   url: string,
   workDir: string,
   onProgress?: YtdlpProgressFn,
   signal?: AbortSignal,
-): Promise<{ videoPath: string; captionsPath: string | null }> {
+): Promise<{ videoPath: string }> {
   fs.mkdirSync(workDir, { recursive: true });
   const output = path.join(workDir, "source.%(ext)s");
   const shared = commonDownloadArgs(output);
@@ -813,9 +739,7 @@ export async function downloadSource(
     await remuxToMp4(path.join(workDir, other), dest);
     video = "source.mp4";
   }
-  const captions = files.find((f) => f.endsWith(".json3")) ?? null;
   return {
     videoPath: path.join(workDir, video),
-    captionsPath: captions ? path.join(workDir, captions) : null,
   };
 }
