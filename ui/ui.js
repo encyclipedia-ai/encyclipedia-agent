@@ -14,6 +14,8 @@ const signOutBtn = $("sign-out");
 const clipBtn = $("clip");
 const passwordInput = $("password");
 const togglePassword = $("toggle-password");
+const liveList = $("live-list");
+const liveEmpty = $("live-empty");
 const queueEl = $("queue");
 const queueEmpty = $("queue-empty");
 const queueSummary = $("queue-summary");
@@ -50,6 +52,39 @@ function shortUrl(url) {
     return `${parsed.hostname}${parsed.pathname}`.replace(/\/$/, "");
   } catch {
     return url;
+  }
+}
+
+const PLATFORM_LABEL = { youtube: "YouTube", twitch: "Twitch", kick: "Kick" };
+
+function renderLive(profiles) {
+  const list = Array.isArray(profiles) ? profiles : [];
+  liveList.replaceChildren();
+  liveEmpty.classList.toggle("hidden", list.length > 0);
+  for (const profile of list) {
+    const li = document.createElement("li");
+    li.className = "live-item";
+    const name = document.createElement("span");
+    name.className = "live-name";
+    const platform = PLATFORM_LABEL[profile.platform] || profile.platform;
+    const handle = profile.handle ? ` · ${profile.handle}` : "";
+    name.textContent = `${platform}${handle}`;
+    const state = document.createElement("span");
+    let label = "Offline";
+    let kind = "";
+    if (profile.connection === "not_connected") {
+      label = "Not connected";
+    } else if (profile.check === "failed") {
+      label = "Couldn't check";
+      kind = "bad";
+    } else if (profile.live) {
+      label = "Live";
+      kind = "on";
+    }
+    state.className = `live-state${kind ? ` ${kind}` : ""}`;
+    state.textContent = label;
+    li.append(name, state);
+    liveList.append(li);
   }
 }
 
@@ -166,6 +201,7 @@ function apply(snap) {
   signInBtn.disabled = busy;
   googleBtn.disabled = busy;
   clipBtn.disabled = !signedIn;
+  renderLive(signedIn ? snap.live : []);
   renderQueue(snap.queue);
 }
 

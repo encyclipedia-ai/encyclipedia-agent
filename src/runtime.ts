@@ -1,3 +1,4 @@
+import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { clearSession, loadConfig, saveConfig, type AgentConfig } from "./config.js";
@@ -29,6 +30,9 @@ import {
 import { ensureTools, refreshYtdlpIfNeeded } from "./tools.js";
 import { assertReadableVideo } from "./media-file.js";
 import { sweepDownloadTemps } from "./ytdlp.js";
+import { captureLiveFile } from "./live-capture.js";
+import { LIVE_POLL_MS, LiveRoll, type RollProfile } from "./live-roll.js";
+import type { LiveCapture } from "./job-queue.js";
 
 export type HelperStatus = "signed_out" | "starting" | "running" | "working" | "error";
 
@@ -38,6 +42,7 @@ export interface HelperSnapshot {
   message: string;
   busy: boolean;
   queue: QueueItem[];
+  live: RollProfile[];
 }
 
 export type HelperListener = (snap: HelperSnapshot) => void;
@@ -47,6 +52,7 @@ function snapshot(
   message: string,
   cfg?: AgentConfig,
   busy = false,
+  live: RollProfile[] = [],
 ): HelperSnapshot {
   const queue = getQueue();
   const active = activeMachineWork();
@@ -79,6 +85,7 @@ function snapshot(
     message: nextMessage,
     busy: nextBusy,
     queue,
+    live: nextStatus === "signed_out" ? [] : live,
   };
 }
 
@@ -188,6 +195,8 @@ export function startHelperLoop(onUpdate: HelperListener): () => void {
   let cfg: AgentConfig | null = null;
   let lastStatus: HelperStatus = "starting";
   let lastMessage = "Opening the stacks…";
+  let liveProfiles: RollProfile[] = [];
+  const roll = new LiveRoll();
 
   const emit = (
     status: HelperStatus,
@@ -196,7 +205,7 @@ export function startHelperLoop(onUpdate: HelperListener): () => void {
   ): void => {
     lastStatus = status;
     lastMessage = message;
-    if (!stopped) onUpdate(snapshot(status, message, cfg ?? undefined, busy));
+    if (!stopped) onUpdate(snapshot(status, message, cfg ?? undefined, busy, liveProfiles));
   };
 
   const unsubscribeQueue = onQueueChange(() => {
@@ -218,7 +227,50 @@ export function startHelperLoop(onUpdate: HelperListener): () => void {
         throw new JobCancelledError();
       }
     }
-    if (item.localPath && item.remoteJobId) {
+    if (item.remoteJobId && item.liveCapture) {
+      const videoId = item.videoId;
+      if (!videoId) throw new Error("The API did not return a video id for this live chunk.");
+      const capture = item.liveCapture;
+      const workDir = await fs.mkdtemp(path.join(os.tmpdir(), "encyclipedia-live-"));
+      try {
+        const filePath = await captureLiveFile(capture, workDir, (update) => {
+          report({
+            phase: "download",
+            percent: update.percent,
+            detail: update.detail,
+          });
+        });
+        const job = await api.getJob(authed, item.remoteJobId);
+        cloudJobId = jobNeedsLibrarianMedia(job.status)
+          ? await handoffLocalFile(
+              authed,
+              {
+                filePath,
+                jobId: item.remoteJobId,
+                videoId,
+                clipLength: item.clipLength,
+                source: {
+                  title: capture.title,
+                  channelId: capture.channelId,
+                  channelName: capture.channelName,
+                  channelUrl: capture.channelUrl,
+                },
+              },
+              onLog,
+            )
+          : item.remoteJobId;
+        if (capture.rollOwned) roll.complete(capture);
+      } catch (err) {
+        if (capture.rollOwned) roll.abandon(capture);
+        const message = err instanceof Error ? err.message : String(err);
+        if (!isJobCancelledError(err)) {
+          await api.failJob(authed, item.remoteJobId, message).catch(() => {});
+        }
+        throw err;
+      } finally {
+        await fs.rm(workDir, { recursive: true, force: true }).catch(() => {});
+      }
+    } else if (item.localPath && item.remoteJobId) {
       const videoId = item.videoId;
       if (!videoId) throw new Error("The API did not return a video id for this file.");
       const job = await api.getJob(authed, item.remoteJobId);
@@ -321,6 +373,7 @@ export function startHelperLoop(onUpdate: HelperListener): () => void {
 
     emit("running", "Librarian is online and connected to your account.");
     let lastHeartbeat = 0;
+    let lastLivePoll = 0;
     while (!stopped) {
       try {
         authed = await ensureFreshToken(authed);
@@ -339,6 +392,19 @@ export function startHelperLoop(onUpdate: HelperListener): () => void {
           emit("running", "Librarian is online. Waiting for the next job…");
         }
       }
+      if (now - lastLivePoll >= LIVE_POLL_MS) {
+        lastLivePoll = now;
+        try {
+          const status = await api.liveStatus(authed);
+          liveProfiles = status.profiles;
+          roll.observe(status.profiles);
+          if (!stopped && !activeMachineWork()) emit(lastStatus, lastMessage);
+        } catch (err) {
+          console.warn(
+            `Could not check live status (${err instanceof Error ? err.message : err}).`,
+          );
+        }
+      }
       if (!hasMachineWork()) {
         let claim: api.ClaimedJob | null = null;
         try {
@@ -347,7 +413,48 @@ export function startHelperLoop(onUpdate: HelperListener): () => void {
           emit("error", `Could not check for jobs (${err instanceof Error ? err.message : err}).`);
         }
         if (claim && !stopped) {
-          enqueueRemote(claim);
+          const liveCapture = liveCaptureFromClaim(claim);
+          enqueueRemote({ ...claim, liveCapture });
+          continue;
+        }
+      }
+      if (!stopped && !hasMachineWork()) {
+        const plan = roll.nextChunk(now);
+        if (plan) {
+          try {
+            const submitted = await api.submitProcess(authed, {
+              url: plan.streamUrl,
+              clipLength: "short",
+              liveChunk: {
+                sessionId: plan.sessionId,
+                startSec: plan.startSec,
+                title: plan.title,
+                ...(plan.endSec != null ? { endSec: plan.endSec } : {}),
+                ...(plan.durationSec != null ? { durationSec: plan.durationSec } : {}),
+              },
+            });
+            if (submitted.deduped) {
+              roll.complete(plan);
+            } else if (!submitted.videoId) {
+              roll.abandon(plan);
+            } else {
+              enqueueLocal(plan.streamUrl, "short", {
+                remoteJobId: submitted.jobId,
+                videoId: submitted.videoId,
+                title: plan.title,
+                ingestKind: "live_chunk",
+                liveCapture: {
+                  ...plan,
+                  rollOwned: true,
+                },
+              });
+            }
+          } catch (err) {
+            roll.abandon(plan);
+            console.warn(
+              `Could not start a live chunk (${err instanceof Error ? err.message : err}).`,
+            );
+          }
           continue;
         }
       }
@@ -370,5 +477,29 @@ export function startHelperLoop(onUpdate: HelperListener): () => void {
   return () => {
     stopped = true;
     unsubscribeQueue();
+  };
+}
+
+function liveCaptureFromClaim(claim: api.ClaimedJob): LiveCapture | undefined {
+  if (claim.ingestKind !== "live_chunk" || !claim.platform || !claim.sourceVideoId) {
+    return undefined;
+  }
+  const endSec = claim.liveChunkEndSec;
+  return {
+    mode: endSec != null ? "dash" : "edge",
+    platform: claim.platform,
+    streamUrl: claim.youtubeUrl,
+    sessionId: claim.sourceVideoId,
+    sessionKey: `${claim.platform}:${claim.sourceVideoId}`,
+    startSec: claim.liveChunkStartSec ?? 0,
+    endSec,
+    durationSec: claim.liveChunkDurationSec,
+    channelId: claim.channelId || "",
+    channelName: claim.channelName || claim.platform,
+    channelUrl: claim.channelUrl || claim.youtubeUrl,
+    title: claim.title || `${claim.platform} live`,
+    rewindCoveredUntil: 0,
+    rewindEdgeIndex: 0,
+    rollOwned: false,
   };
 }

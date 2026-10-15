@@ -38,12 +38,6 @@ export interface VideoInfo {
   channelAvatar: string | null;
 }
 
-export interface TranscriptSegment {
-  start: number;
-  end: number;
-  text: string;
-}
-
 export interface ClipPlanItem {
   title: string;
   summary: string;
@@ -53,11 +47,26 @@ export interface ClipPlanItem {
   viralScore: number;
   transcript: string;
   publishHashtags?: string;
+  /** Story this moment belongs to. Shared categories can form one highlight. */
+  category?: string;
+}
+
+export interface ClipCategoryGroup {
+  description: string;
+  clipIndexes: number[];
 }
 
 export interface ClipPlan {
   clips: ClipPlanItem[];
   costUsd: number;
+  categories?: ClipCategoryGroup[];
+}
+
+export interface AnalysisChunk {
+  bucket: string;
+  objectKey: string;
+  startSec: number;
+  durationSec: number;
 }
 
 export interface UploadTarget {
@@ -78,7 +87,7 @@ export interface DownloadTarget {
   windowDurationSec?: number;
 }
 
-export type UploadKind = "video" | "captions" | "recut" | "audio" | "window";
+export type UploadKind = "video" | "recut" | "window" | "chunk";
 
 export interface SourceWindow {
   objectKey: string;
@@ -89,7 +98,6 @@ export interface SourceWindow {
 export interface JobSource {
   bucket: string;
   objectKey?: string;
-  subtitleKey?: string;
   windows?: SourceWindow[];
 }
 
@@ -178,7 +186,7 @@ export function requestUploadUrl(
       videoId,
       kind,
       contentType,
-      ...(kind === "window" ? { index } : {}),
+      ...(kind === "window" || kind === "chunk" ? { index } : {}),
     }),
   });
 }
@@ -202,7 +210,7 @@ export function requestDownloadUrl(
 export function analyze(
   cfg: AgentConfig,
   body: {
-    segments: TranscriptSegment[];
+    chunks: AnalysisChunk[];
     clipLength: "short" | "medium";
     video: VideoInfo;
     videoTitle?: string;
@@ -214,29 +222,11 @@ export function analyze(
   });
 }
 
-export function transcribeJob(
-  cfg: AgentConfig,
-  jobId: string,
-  body: { bucket: string; objectKey: string },
-  signal?: AbortSignal,
-) {
-  return request<{
-    segments: TranscriptSegment[];
-    durationMinutes: number;
-    costUsd: number;
-    language: string;
-  }>(cfg, `/api/agent/jobs/${encodeURIComponent(jobId)}/transcribe`, {
-    method: "POST",
-    body: JSON.stringify(body),
-    signal,
-  });
-}
-
 export function analyzeJob(
   cfg: AgentConfig,
   jobId: string,
   body: {
-    segments: TranscriptSegment[];
+    chunks: AnalysisChunk[];
     clipLength: "short" | "medium";
     videoTitle?: string;
   },
@@ -253,10 +243,43 @@ export function analyzeJob(
   );
 }
 
+export type LivePlatform = "youtube" | "twitch" | "kick";
+
+export interface LiveBroadcast {
+  status: "is_live";
+  streamUrl: string;
+  videoId: string;
+  title: string;
+  startedAt: number | null;
+}
+
+export interface LiveProfile {
+  platform: LivePlatform;
+  connection: "connected" | "not_connected";
+  platformUserId: string | null;
+  handle: string | null;
+  displayName: string | null;
+  profileUrl: string | null;
+  live: LiveBroadcast | null;
+  check: "ok" | "failed";
+}
+
+export interface LiveChunkRequest {
+  sessionId?: string;
+  startSec: number;
+  endSec?: number;
+  durationSec?: number;
+  title?: string;
+}
+
+export function liveStatus(cfg: AgentConfig) {
+  return request<{ profiles: LiveProfile[] }>(cfg, "/api/agent/live");
+}
+
 export function submitProcess(
   cfg: AgentConfig,
   body:
-    | { url: string; clipLength: "short" | "medium" }
+    | { url: string; clipLength: "short" | "medium"; liveChunk?: LiveChunkRequest }
     | { localFile: { displayName: string }; clipLength: "short" | "medium" },
 ) {
   return request<{ jobId: string; status: string; deduped?: boolean; videoId?: string }>(
@@ -346,10 +369,18 @@ export interface ClaimedJob {
   clipLength: "short" | "medium";
   videoId: string | null;
   kind?: "process" | "recut";
-  ingestKind?: "local_file";
+  ingestKind?: "local_file" | "live_chunk";
   startSec?: number;
   durationSec?: number;
   title?: string;
+  platform?: LivePlatform;
+  liveChunkStartSec?: number;
+  liveChunkEndSec?: number;
+  liveChunkDurationSec?: number;
+  channelId?: string;
+  channelName?: string;
+  channelUrl?: string;
+  sourceVideoId?: string;
 }
 
 export async function claimJob(cfg: AgentConfig): Promise<ClaimedJob | null> {

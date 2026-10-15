@@ -506,12 +506,6 @@ function commonDownloadArgs(output: string): string[] {
   return [
     "--newline",
     "--no-playlist",
-    "--write-subs",
-    "--write-auto-subs",
-    "--sub-format",
-    "json3",
-    "--sub-langs",
-    "en.*,en",
     "--no-part",
     "--output",
     output,
@@ -626,7 +620,12 @@ function formatSectionTime(totalSeconds: number): string {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
-/** Download only [startSec, startSec+durationSec] — clip windows, not the full VOD. */
+/**
+ * Download only [startSec, startSec+durationSec].
+ * `liveFromStart` makes those times count from the broadcast start (YouTube
+ * DASH). Without it, yt-dlp cuts a VOD. A live edge that cannot seek uses
+ * `recordLiveEdge` instead: `--download-sections` would not stop a live URL.
+ */
 export async function downloadSection(
   url: string,
   startSec: number,
@@ -635,32 +634,85 @@ export async function downloadSection(
   onProgress?: YtdlpProgressFn,
   outputStem = "recut",
   signal?: AbortSignal,
+  options?: { liveFromStart?: boolean },
+): Promise<string> {
+  if (durationSec <= 0) throw new Error(`invalid section length: ${durationSec}`);
+  const section = `*${formatSectionTime(startSec)}-${formatSectionTime(startSec + durationSec)}`;
+  return downloadIntoMp4(
+    workDir,
+    outputStem,
+    [
+      ...(options?.liveFromStart ? ["--live-from-start"] : []),
+      "--download-sections",
+      section,
+      ...(options?.liveFromStart ? [] : ["--force-keyframes-at-cuts"]),
+    ],
+    url,
+    onProgress,
+    signal,
+  );
+}
+
+/**
+ * Record `durationSec` of the current live edge. Used for Twitch and Kick,
+ * whose HLS playlists cannot seek back to the start of the broadcast.
+ */
+export async function recordLiveEdge(
+  url: string,
+  durationSec: number,
+  workDir: string,
+  onProgress?: YtdlpProgressFn,
+  signal?: AbortSignal,
+): Promise<string> {
+  const seconds = Math.max(1, Math.floor(durationSec));
+  return downloadIntoMp4(
+    workDir,
+    "live-edge",
+    ["--downloader", "ffmpeg", "--downloader-args", `ffmpeg:-t ${seconds}`],
+    url,
+    onProgress,
+    signal,
+  );
+}
+
+async function downloadIntoMp4(
+  workDir: string,
+  outputStem: string,
+  args: string[],
+  url: string,
+  onProgress?: YtdlpProgressFn,
+  signal?: AbortSignal,
 ): Promise<string> {
   fs.mkdirSync(workDir, { recursive: true });
-  const output = path.join(workDir, `${outputStem}.%(ext)s`);
-  const section = `*${formatSectionTime(startSec)}-${formatSectionTime(startSec + durationSec)}`;
-  const format = recutYoutubeFormat();
-  const argv = [
-    "--newline",
-    "--no-playlist",
-    "--no-part",
-    "--download-sections",
-    section,
-    "-f",
-    format,
-    "--merge-output-format",
-    "mp4",
-    "--force-keyframes-at-cuts",
-    "--output",
-    output,
-  ];
+  await run(
+    [
+      "--newline",
+      "--no-playlist",
+      "--no-part",
+      ...args,
+      "-f",
+      recutYoutubeFormat(),
+      "--merge-output-format",
+      "mp4",
+      "--output",
+      path.join(workDir, `${outputStem}.%(ext)s`),
+      url,
+    ],
+    { cwd: workDir, onProgress, signal },
+  );
+  return takeProducedMp4(workDir, outputStem, onProgress);
+}
 
-  await run([...argv, url], { cwd: workDir, onProgress, signal });
-
+async function takeProducedMp4(
+  workDir: string,
+  outputStem: string,
+  onProgress?: YtdlpProgressFn,
+): Promise<string> {
   const files = fs.readdirSync(workDir);
   const expected = `${outputStem}.mp4`;
   let video =
-    files.find((f) => f === expected) ?? files.find((f) => f.startsWith(`${outputStem}.`) && f.endsWith(".mp4"));
+    files.find((f) => f === expected) ??
+    files.find((f) => f.startsWith(`${outputStem}.`) && f.endsWith(".mp4"));
   if (!video) {
     const other = files.find(
       (f) => f.startsWith(`${outputStem}.`) && /\.(mkv|webm|mov)$/i.test(f),
@@ -674,80 +726,12 @@ export async function downloadSection(
   return path.join(workDir, video);
 }
 
-/** Fetch English captions without downloading the VOD. */
-export async function downloadCaptions(
-  url: string,
-  workDir: string,
-  onProgress?: YtdlpProgressFn,
-  signal?: AbortSignal,
-): Promise<string | null> {
-  fs.mkdirSync(workDir, { recursive: true });
-  const output = path.join(workDir, "captions");
-  try {
-    await run(
-      [
-        "--skip-download",
-        "--write-subs",
-        "--write-auto-subs",
-        "--sub-format",
-        "json3",
-        "--sub-langs",
-        "en.*,en",
-        "--no-playlist",
-        "--output",
-        output,
-        url,
-      ],
-      { cwd: workDir, onProgress, signal },
-    );
-  } catch (err) {
-    if (err instanceof Error && err.name === "AbortError") throw err;
-    return null;
-  }
-  const files = fs.readdirSync(workDir);
-  const captions = files.find((f) => f.endsWith(".json3")) ?? null;
-  return captions ? path.join(workDir, captions) : null;
-}
-
-/** Audio-only download for Whisper when captions are missing. */
-export async function downloadAudio(
-  url: string,
-  workDir: string,
-  onProgress?: YtdlpProgressFn,
-  signal?: AbortSignal,
-): Promise<string> {
-  fs.mkdirSync(workDir, { recursive: true });
-  const output = path.join(workDir, "audio.%(ext)s");
-  await run(
-    [
-      "--newline",
-      "--no-playlist",
-      "--no-part",
-      "-x",
-      "--audio-format",
-      "mp3",
-      "--audio-quality",
-      "7",
-      "--output",
-      output,
-      url,
-    ],
-    { cwd: workDir, onProgress, signal },
-  );
-  const files = fs.readdirSync(workDir);
-  const audio =
-    files.find((f) => f === "audio.mp3") ??
-    files.find((f) => /^audio\./i.test(f) && /\.(mp3|m4a|opus|webm)$/i.test(f));
-  if (!audio) throw new Error("yt-dlp finished but no audio file was produced");
-  return path.join(workDir, audio);
-}
-
 export async function downloadSource(
   url: string,
   workDir: string,
   onProgress?: YtdlpProgressFn,
   signal?: AbortSignal,
-): Promise<{ videoPath: string; captionsPath: string | null }> {
+): Promise<{ videoPath: string }> {
   fs.mkdirSync(workDir, { recursive: true });
   const output = path.join(workDir, "source.%(ext)s");
   const shared = commonDownloadArgs(output);
@@ -813,9 +797,7 @@ export async function downloadSource(
     await remuxToMp4(path.join(workDir, other), dest);
     video = "source.mp4";
   }
-  const captions = files.find((f) => f.endsWith(".json3")) ?? null;
   return {
     videoPath: path.join(workDir, video),
-    captionsPath: captions ? path.join(workDir, captions) : null,
   };
 }

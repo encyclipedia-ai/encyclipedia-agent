@@ -376,6 +376,42 @@ button.ghost:hover:not(:disabled) {
   border-top: 1px solid var(--line);
 }
 
+.live-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.live-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: baseline;
+}
+
+.live-name {
+  color: var(--ink);
+}
+
+.live-state {
+  font-family: var(--font-serif);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.live-state.on {
+  color: var(--ok);
+}
+
+.live-state.bad {
+  color: var(--bad);
+}
+
 .queue-heading {
   margin: 0 0 10px;
   font-family: var(--font-serif);
