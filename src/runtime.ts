@@ -31,7 +31,7 @@ import { ensureTools, refreshYtdlpIfNeeded } from "./tools.js";
 import { assertReadableVideo } from "./media-file.js";
 import { sweepDownloadTemps } from "./ytdlp.js";
 import { captureLiveFile } from "./live-capture.js";
-import { LIVE_POLL_MS, LiveRoll, type LiveCapturePlan, type RollProfile } from "./live-roll.js";
+import { LIVE_POLL_MS, LiveRoll, type RollProfile } from "./live-roll.js";
 import type { LiveCapture } from "./job-queue.js";
 
 export type HelperStatus = "signed_out" | "starting" | "running" | "working" | "error";
@@ -233,7 +233,7 @@ export function startHelperLoop(onUpdate: HelperListener): () => void {
       const capture = item.liveCapture;
       const workDir = await fs.mkdtemp(path.join(os.tmpdir(), "encyclipedia-live-"));
       try {
-        const filePath = await captureLiveFile(capturePlan(capture), workDir, (update) => {
+        const filePath = await captureLiveFile(capture, workDir, (update) => {
           report({
             phase: "download",
             percent: update.percent,
@@ -259,9 +259,9 @@ export function startHelperLoop(onUpdate: HelperListener): () => void {
               onLog,
             )
           : item.remoteJobId;
-        if (capture.rollOwned) roll.complete(capturePlan(capture));
+        if (capture.rollOwned) roll.complete(capture);
       } catch (err) {
-        if (capture.rollOwned) roll.abandon(capturePlan(capture));
+        if (capture.rollOwned) roll.abandon(capture);
         const message = err instanceof Error ? err.message : String(err);
         if (!isJobCancelledError(err)) {
           await api.failJob(authed, item.remoteJobId, message).catch(() => {});
@@ -428,7 +428,6 @@ export function startHelperLoop(onUpdate: HelperListener): () => void {
               liveChunk: {
                 sessionId: plan.sessionId,
                 startSec: plan.startSec,
-                mode: plan.mode,
                 title: plan.title,
                 ...(plan.endSec != null ? { endSec: plan.endSec } : {}),
                 ...(plan.durationSec != null ? { durationSec: plan.durationSec } : {}),
@@ -481,42 +480,26 @@ export function startHelperLoop(onUpdate: HelperListener): () => void {
   };
 }
 
-function capturePlan(capture: LiveCapture): LiveCapturePlan {
-  return {
-    sessionKey: capture.sessionKey,
-    platform: capture.platform,
-    mode: capture.mode,
-    streamUrl: capture.streamUrl,
-    sessionId: capture.sessionId,
-    title: capture.title,
-    startSec: capture.startSec,
-    endSec: capture.endSec,
-    durationSec: capture.durationSec,
-    channelId: capture.channelId,
-    channelName: capture.channelName,
-    channelUrl: capture.channelUrl,
-    rewindCoveredUntil: capture.rewindCoveredUntil ?? 0,
-    rewindEdgeIndex: capture.rewindEdgeIndex ?? 0,
-  };
-}
-
 function liveCaptureFromClaim(claim: api.ClaimedJob): LiveCapture | undefined {
   if (claim.ingestKind !== "live_chunk" || !claim.platform || !claim.sourceVideoId) {
     return undefined;
   }
+  const endSec = claim.liveChunkEndSec;
   return {
-    mode: claim.captureMode ?? (claim.liveChunkEndSec != null ? "dash" : "edge"),
+    mode: endSec != null ? "dash" : "edge",
     platform: claim.platform,
     streamUrl: claim.youtubeUrl,
     sessionId: claim.sourceVideoId,
     sessionKey: `${claim.platform}:${claim.sourceVideoId}`,
     startSec: claim.liveChunkStartSec ?? 0,
-    endSec: claim.liveChunkEndSec,
+    endSec,
     durationSec: claim.liveChunkDurationSec,
     channelId: claim.channelId || "",
     channelName: claim.channelName || claim.platform,
     channelUrl: claim.channelUrl || claim.youtubeUrl,
     title: claim.title || `${claim.platform} live`,
+    rewindCoveredUntil: 0,
+    rewindEdgeIndex: 0,
     rollOwned: false,
   };
 }

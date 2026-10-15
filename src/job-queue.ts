@@ -1,4 +1,5 @@
 import { isRecutClaim } from "./claim.js";
+import type { LiveCapturePlan } from "./live-roll.js";
 
 export type WorkPhase =
   | "queued"
@@ -13,23 +14,9 @@ export type WorkPhase =
 
 export type IngestKind = "local_file" | "live_chunk";
 
-export interface LiveCapture {
-  mode: "dash" | "edge";
-  platform: "youtube" | "twitch" | "kick";
-  streamUrl: string;
-  sessionId: string;
-  sessionKey: string;
-  startSec: number;
-  endSec?: number;
-  durationSec?: number;
-  channelId: string;
-  channelName: string;
-  channelUrl: string;
-  title: string;
+export interface LiveCapture extends LiveCapturePlan {
   /** Set when this chunk was opened by the rolling session, so a failure can rewind it. */
   rollOwned?: boolean;
-  rewindCoveredUntil?: number;
-  rewindEdgeIndex?: number;
 }
 
 export interface QueueItem {

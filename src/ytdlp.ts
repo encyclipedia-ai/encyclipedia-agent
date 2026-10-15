@@ -626,7 +626,12 @@ function formatSectionTime(totalSeconds: number): string {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
-/** Download only [startSec, startSec+durationSec] — clip windows, not the full VOD. */
+/**
+ * Download only [startSec, startSec+durationSec].
+ * `liveFromStart` makes those times count from the broadcast start (YouTube
+ * DASH). Without it, yt-dlp cuts a VOD. A live edge that cannot seek uses
+ * `recordLiveEdge` instead: `--download-sections` would not stop a live URL.
+ */
 export async function downloadSection(
   url: string,
   startSec: number,
@@ -635,84 +640,23 @@ export async function downloadSection(
   onProgress?: YtdlpProgressFn,
   outputStem = "recut",
   signal?: AbortSignal,
+  options?: { liveFromStart?: boolean },
 ): Promise<string> {
-  fs.mkdirSync(workDir, { recursive: true });
-  const output = path.join(workDir, `${outputStem}.%(ext)s`);
+  if (durationSec <= 0) throw new Error(`invalid section length: ${durationSec}`);
   const section = `*${formatSectionTime(startSec)}-${formatSectionTime(startSec + durationSec)}`;
-  const format = recutYoutubeFormat();
-  const argv = [
-    "--newline",
-    "--no-playlist",
-    "--no-part",
-    "--download-sections",
-    section,
-    "-f",
-    format,
-    "--merge-output-format",
-    "mp4",
-    "--force-keyframes-at-cuts",
-    "--output",
-    output,
-  ];
-
-  await run([...argv, url], { cwd: workDir, onProgress, signal });
-
-  const files = fs.readdirSync(workDir);
-  const expected = `${outputStem}.mp4`;
-  let video =
-    files.find((f) => f === expected) ?? files.find((f) => f.startsWith(`${outputStem}.`) && f.endsWith(".mp4"));
-  if (!video) {
-    const other = files.find(
-      (f) => f.startsWith(`${outputStem}.`) && /\.(mkv|webm|mov)$/i.test(f),
-    );
-    if (!other) throw new Error("yt-dlp finished but no clip file was produced");
-    onProgress?.({ percent: 100, detail: "Converting to mp4…" });
-    const dest = path.join(workDir, expected);
-    await remuxToMp4(path.join(workDir, other), dest);
-    video = expected;
-  }
-  return path.join(workDir, video);
-}
-
-/**
- * Download a closed DASH window from a YouTube livestream.
- * Times are seconds from the start of the broadcast and must already be
- * behind the live edge. Falls back to the caller if yt-dlp cannot seek.
- */
-export async function downloadLiveDashWindow(
-  url: string,
-  fromSec: number,
-  toSec: number,
-  workDir: string,
-  onProgress?: YtdlpProgressFn,
-  signal?: AbortSignal,
-): Promise<string> {
-  if (toSec <= fromSec) {
-    throw new Error(`invalid live window: ${fromSec}-${toSec}`);
-  }
-  fs.mkdirSync(workDir, { recursive: true });
-  const outputStem = "live-window";
-  const output = path.join(workDir, `${outputStem}.%(ext)s`);
-  const section = `*${formatSectionTime(fromSec)}-${formatSectionTime(toSec)}`;
-  await run(
+  return downloadIntoMp4(
+    workDir,
+    outputStem,
     [
-      "--newline",
-      "--no-playlist",
-      "--no-part",
-      "--live-from-start",
+      ...(options?.liveFromStart ? ["--live-from-start"] : []),
       "--download-sections",
       section,
-      "-f",
-      recutYoutubeFormat(),
-      "--merge-output-format",
-      "mp4",
-      "--output",
-      output,
-      url,
+      ...(options?.liveFromStart ? [] : ["--force-keyframes-at-cuts"]),
     ],
-    { cwd: workDir, onProgress, signal },
+    url,
+    onProgress,
+    signal,
   );
-  return takeProducedMp4(workDir, outputStem, onProgress);
 }
 
 /**
@@ -727,24 +671,37 @@ export async function recordLiveEdge(
   signal?: AbortSignal,
 ): Promise<string> {
   const seconds = Math.max(1, Math.floor(durationSec));
+  return downloadIntoMp4(
+    workDir,
+    "live-edge",
+    ["--downloader", "ffmpeg", "--downloader-args", `ffmpeg:-t ${seconds}`],
+    url,
+    onProgress,
+    signal,
+  );
+}
+
+async function downloadIntoMp4(
+  workDir: string,
+  outputStem: string,
+  args: string[],
+  url: string,
+  onProgress?: YtdlpProgressFn,
+  signal?: AbortSignal,
+): Promise<string> {
   fs.mkdirSync(workDir, { recursive: true });
-  const outputStem = "live-edge";
-  const output = path.join(workDir, `${outputStem}.%(ext)s`);
   await run(
     [
       "--newline",
       "--no-playlist",
       "--no-part",
-      "--downloader",
-      "ffmpeg",
-      "--downloader-args",
-      `ffmpeg:-t ${seconds}`,
+      ...args,
       "-f",
       recutYoutubeFormat(),
       "--merge-output-format",
       "mp4",
       "--output",
-      output,
+      path.join(workDir, `${outputStem}.%(ext)s`),
       url,
     ],
     { cwd: workDir, onProgress, signal },

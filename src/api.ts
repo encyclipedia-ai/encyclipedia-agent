@@ -279,7 +279,6 @@ export interface LiveChunkRequest {
   startSec: number;
   endSec?: number;
   durationSec?: number;
-  mode?: "dash" | "edge";
   title?: string;
 }
 
@@ -385,7 +384,6 @@ export interface ClaimedJob {
   durationSec?: number;
   title?: string;
   platform?: LivePlatform;
-  captureMode?: "dash" | "edge";
   liveChunkStartSec?: number;
   liveChunkEndSec?: number;
   liveChunkDurationSec?: number;
