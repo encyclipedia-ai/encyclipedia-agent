@@ -4,19 +4,22 @@ import path from "node:path";
 import type { AgentConfig } from "./config.js";
 import * as api from "./api.js";
 import { AgentApiError, JobCancelledError, isJobCancelledError } from "./api.js";
-import { analysisChunkRanges } from "./analysis-chunks.js";
+import { parseJson3Captions } from "./captions.js";
 import type { QueuePatch } from "./job-queue.js";
 import { isRecutClaim, isLocalFileIngest, RECUT_NOT_FULL_VOD, RECUT_WINDOW_MISSING } from "./claim.js";
 import {
   assertReadableVideo,
   cutMediaSection,
   downloadToFile,
+  extractAudioMp3,
   prepareSourceMp4,
   probeMediaFile,
 } from "./media-file.js";
 import { paddedClipWindow } from "./clip-windows.js";
 import { putFile } from "./upload.js";
 import {
+  downloadAudio,
+  downloadCaptions,
   downloadSection,
   downloadSource,
   dumpVideoInfo,
@@ -68,17 +71,18 @@ export async function ingestSource(
   sweepDownloadTemps();
   const workDir = await fs.mkdtemp(path.join(os.tmpdir(), "encyclipedia-agent-"));
   try {
-    const chunks = await uploadYoutubeAnalysisChunks(
+    const segments = await transcriptFromYoutube(
       cfg,
       url,
-      video,
+      video.id,
+      opts.jobId,
       workDir,
       onLog,
       opts.signal,
     );
-    const clipPlan = await analyzeChunks(
+    const clipPlan = await analyzeSegments(
       cfg,
-      chunks,
+      segments,
       video,
       opts.clipLength,
       opts.jobId,
@@ -94,156 +98,154 @@ export async function ingestSource(
       onLog,
       opts.signal,
     );
+    const refined = await refineClipPlan(
+      cfg,
+      opts.jobId,
+      video.title,
+      opts.clipLength,
+      windows,
+      clipPlan,
+      onLog,
+      opts.signal,
+    );
     return {
       video,
       source: { bucket: windows.bucket, windows: windows.windows },
-      clipPlan,
+      clipPlan: refined,
     };
   } finally {
     await fs.rm(workDir, { recursive: true, force: true }).catch(() => {});
   }
 }
 
-async function uploadYoutubeAnalysisChunks(
+async function transcriptFromYoutube(
   cfg: AgentConfig,
   url: string,
-  video: api.VideoInfo,
+  videoId: string,
+  jobId: string,
   workDir: string,
   onLog?: LogFn,
   signal?: AbortSignal,
-): Promise<api.AnalysisChunk[]> {
-  const ranges = analysisChunkRanges(video.duration);
-  let localSource: string | undefined;
-  return uploadAnalysisChunkFiles(cfg, video.id, ranges, async (range, index) => {
-    if (localSource) {
-      const cutPath = path.join(workDir, `chunk_${index}.mp4`);
-      await cutMediaSection(localSource, range.startSec, range.durationSec, cutPath);
-      return cutPath;
-    }
-    try {
-      return await downloadSection(
-        url,
-        range.startSec,
-        range.durationSec,
-        workDir,
-        (update) => {
-          onLog?.({
-            phase: "download",
-            percent: update.percent,
-            detail: update.detail,
-          });
-        },
-        `chunk_${index}`,
-        signal,
-      );
-    } catch (err) {
-      if (isJobCancelledError(err)) throw err;
-      const message = err instanceof Error ? err.message : String(err);
-      say(
-        onLog,
-        `Section download failed (${message}). Downloading locally to cut 30-minute chunks — the full file stays on this computer.`,
-      );
-      if (!localSource) {
-        const downloaded = await downloadSource(
-          url,
-          workDir,
-          (update) => {
-            onLog?.({
-              phase: "download",
-              percent: update.percent,
-              detail: update.detail,
-            });
-          },
-          signal,
-        );
-        localSource = downloaded.videoPath;
-      }
-      const cutPath = path.join(workDir, `chunk_${index}.mp4`);
-      await cutMediaSection(localSource, range.startSec, range.durationSec, cutPath);
-      return cutPath;
-    }
-  }, onLog, signal);
+): Promise<api.TranscriptSegment[]> {
+  say(onLog, "Checking captions…", { phase: "download", percent: null });
+  const captionsPath = await downloadCaptions(
+    url,
+    workDir,
+    (update) => {
+      onLog?.({
+        phase: "download",
+        percent: update.percent,
+        detail: update.detail,
+      });
+    },
+    signal,
+  );
+  const segments = captionsPath ? await segmentsFromCaptions(captionsPath, onLog) : null;
+  if (segments && segments.length > 0) return segments;
+  return transcribeFromYoutubeAudio(cfg, url, videoId, jobId, workDir, onLog, signal);
 }
 
-async function uploadLocalAnalysisChunks(
+async function segmentsFromCaptions(
+  captionsPath: string,
+  onLog?: LogFn,
+): Promise<api.TranscriptSegment[] | null> {
+  try {
+    const raw = await fs.readFile(captionsPath, "utf8");
+    const segments = parseJson3Captions(raw);
+    if (segments.length === 0) {
+      say(onLog, "Captions were empty. Librarian will transcribe the audio instead.");
+      return null;
+    }
+    return segments;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    say(onLog, `Captions could not be parsed (${message}). Librarian will transcribe the audio instead.`);
+    return null;
+  }
+}
+
+async function transcribeFromYoutubeAudio(
   cfg: AgentConfig,
+  url: string,
   videoId: string,
-  sourcePath: string,
-  durationSec: number,
+  jobId: string,
   workDir: string,
   onLog?: LogFn,
   signal?: AbortSignal,
-): Promise<api.AnalysisChunk[]> {
-  const ranges = analysisChunkRanges(durationSec);
-  return uploadAnalysisChunkFiles(cfg, videoId, ranges, async (range, index) => {
-    const cutPath = path.join(workDir, `chunk_${index}.mp4`);
-    await cutMediaSection(sourcePath, range.startSec, range.durationSec, cutPath);
-    return cutPath;
-  }, onLog, signal);
+): Promise<api.TranscriptSegment[]> {
+  say(onLog, "No captions found. Downloading audio to transcribe…", {
+    phase: "download",
+    percent: 0,
+  });
+  const audioPath = await downloadAudio(
+    url,
+    workDir,
+    (update) => {
+      onLog?.({
+        phase: "download",
+        percent: update.percent,
+        detail: update.detail,
+      });
+    },
+    signal,
+  );
+  const transcribed = await uploadAudioAndTranscribe(cfg, videoId, jobId, audioPath, onLog, signal);
+  return transcribed.segments;
 }
 
-async function uploadAnalysisChunkFiles(
+async function uploadAudioAndTranscribe(
   cfg: AgentConfig,
   videoId: string,
-  ranges: Array<{ startSec: number; durationSec: number }>,
-  materialize: (
-    range: { startSec: number; durationSec: number },
-    index: number,
-  ) => Promise<string>,
+  jobId: string,
+  audioPath: string,
   onLog?: LogFn,
   signal?: AbortSignal,
-): Promise<api.AnalysisChunk[]> {
-  const chunks: api.AnalysisChunk[] = [];
-  for (const [index, range] of ranges.entries()) {
-    const startMin = Math.floor(range.startSec / 60);
-    const endMin = Math.ceil((range.startSec + range.durationSec) / 60);
-    say(onLog, `Preparing minutes ${startMin}–${endMin}…`, {
-      phase: "download",
-      percent: 0,
-    });
-    const videoPath = await materialize(range, index);
-    say(onLog, `Uploading minutes ${startMin}–${endMin} for Gemini…`, {
-      phase: "upload",
-      percent: 0,
-    });
-    const target = await api.requestUploadUrl(cfg, videoId, "chunk", "video/mp4", index);
-    await putFile(
-      target,
-      videoPath,
-      (percent, sent, total) => {
-        onLog?.({
-          phase: "upload",
-          percent,
-          detail: `Uploading minutes ${startMin}–${endMin} · ${percent}% · ${formatBytes(sent)} of ${formatBytes(total)}`,
-        });
-      },
-      signal,
-    );
-    chunks.push({
+): Promise<{ segments: api.TranscriptSegment[] }> {
+  say(onLog, "Uploading audio for transcription…", { phase: "upload", percent: 0 });
+  const target = await api.requestUploadUrl(cfg, videoId, "audio", "audio/mpeg");
+  await putFile(
+    target,
+    audioPath,
+    (percent, sent, total) => {
+      onLog?.({
+        phase: "upload",
+        percent,
+        detail: `Uploading audio ${percent}% · ${formatBytes(sent)} of ${formatBytes(total)}`,
+      });
+    },
+    signal,
+  );
+  say(onLog, "Transcribing speech…", { phase: "analyze", percent: null });
+  const result = await api.transcribeJob(
+    cfg,
+    jobId,
+    {
       bucket: target.bucket,
       objectKey: target.objectKey,
-      startSec: range.startSec,
-      durationSec: range.durationSec,
-    });
+    },
+    signal,
+  );
+  if (result.segments.length === 0) {
+    throw new Error("Transcription produced no speech. Try another file.");
   }
-  return chunks;
+  return { segments: result.segments };
 }
 
-async function analyzeChunks(
+async function analyzeSegments(
   cfg: AgentConfig,
-  chunks: api.AnalysisChunk[],
+  segments: api.TranscriptSegment[],
   video: api.VideoInfo,
   clipLength: "short" | "medium",
   jobId: string,
   onLog?: LogFn,
   signal?: AbortSignal,
 ): Promise<api.ClipPlan> {
-  say(onLog, "Watching the video for viral moments…", { phase: "analyze", percent: null });
+  say(onLog, "Scanning the transcript for viral moments…", { phase: "analyze", percent: null });
   const plan = await api.analyzeJob(
     cfg,
     jobId,
     {
-      chunks,
+      segments,
       clipLength,
       videoTitle: video.title,
     },
@@ -252,17 +254,48 @@ async function analyzeChunks(
   if (plan.clips.length === 0) {
     throw new Error("No clip-worthy moments were found in this video.");
   }
-  const grouped = plan.categories?.length
-    ? plan.categories.length
-    : new Set(plan.clips.map((clip) => clip.category).filter(Boolean)).size;
   say(
     onLog,
-    plan.clips.length === 1
-      ? "Found 1 viral moment"
-      : `Found ${plan.clips.length} viral moments in ${grouped} highlight${grouped === 1 ? "" : "s"}`,
+    plan.clips.length === 1 ? "Found 1 viral moment" : `Found ${plan.clips.length} viral moments`,
     { phase: "analyze" },
   );
   return plan;
+}
+
+async function refineClipPlan(
+  cfg: AgentConfig,
+  jobId: string,
+  videoTitle: string,
+  clipLength: "short" | "medium",
+  windows: { bucket: string; windows: api.SourceWindow[] },
+  clipPlan: api.ClipPlan,
+  onLog?: LogFn,
+  signal?: AbortSignal,
+): Promise<api.ClipPlan> {
+  say(onLog, "Checking the moments against the video…", { phase: "analyze", percent: null });
+  try {
+    return await api.refineJob(
+      cfg,
+      jobId,
+      {
+        windows: windows.windows.map((window) => ({
+          bucket: windows.bucket,
+          objectKey: window.objectKey,
+          startSec: window.startSec,
+          durationSec: window.durationSec,
+        })),
+        clips: clipPlan.clips,
+        clipLength,
+        videoTitle,
+      },
+      signal,
+    );
+  } catch (err) {
+    if (isJobCancelledError(err)) throw err;
+    const message = err instanceof Error ? err.message : String(err);
+    say(onLog, `Video check failed (${message}). Keeping the transcript cuts.`);
+    return clipPlan;
+  }
 }
 
 async function uploadYoutubeClipWindows(
@@ -477,18 +510,20 @@ export async function handoffLocalFile(
       channelUrl: "",
       channelAvatar: null,
     };
-    const chunks = await uploadLocalAnalysisChunks(
+    say(onLog, "Extracting audio…", { phase: "download", percent: null });
+    const audioPath = path.join(workDir, "audio.mp3");
+    await extractAudioMp3(prepared.videoPath, audioPath);
+    const { segments } = await uploadAudioAndTranscribe(
       cfg,
       videoId,
-      prepared.videoPath,
-      probed.duration,
-      workDir,
+      jobId,
+      audioPath,
       onLog,
       watch.signal,
     );
-    const clipPlan = await analyzeChunks(
+    const clipPlan = await analyzeSegments(
       cfg,
-      chunks,
+      segments,
       video,
       opts.clipLength,
       jobId,
@@ -505,11 +540,21 @@ export async function handoffLocalFile(
       onLog,
       watch.signal,
     );
+    const refined = await refineClipPlan(
+      cfg,
+      jobId,
+      video.title,
+      opts.clipLength,
+      windows,
+      clipPlan,
+      onLog,
+      watch.signal,
+    );
     say(onLog, "Handing off to the renderer…", { phase: "upload", percent: 100 });
     await api.completeJob(cfg, jobId, {
       video,
       source: { bucket: windows.bucket, windows: windows.windows },
-      clipPlan,
+      clipPlan: refined,
     }, watch.signal);
     return jobId;
   } catch (err) {

@@ -56,6 +56,21 @@ export interface VideoInfo {
   channelAvatar: string | null;
 }
 
+export interface TranscriptSegment {
+  start: number;
+  end: number;
+  text: string;
+}
+
+export interface UsageEvent {
+  kind: "clip_detection" | "layout_vision";
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  costUsd: number;
+  at: number;
+}
+
 export interface ClipPlanItem {
   title: string;
   summary: string;
@@ -77,10 +92,11 @@ export interface ClipCategoryGroup {
 export interface ClipPlan {
   clips: ClipPlanItem[];
   costUsd: number;
+  usageEvents?: UsageEvent[];
   categories?: ClipCategoryGroup[];
 }
 
-export interface AnalysisChunk {
+export interface ReviewWindow {
   bucket: string;
   objectKey: string;
   startSec: number;
@@ -105,7 +121,7 @@ export interface DownloadTarget {
   windowDurationSec?: number;
 }
 
-export type UploadKind = "video" | "recut" | "window" | "chunk";
+export type UploadKind = "video" | "recut" | "audio" | "window";
 
 export interface SourceWindow {
   objectKey: string;
@@ -211,7 +227,7 @@ export function requestUploadUrl(
       videoId,
       kind,
       contentType,
-      ...(kind === "window" || kind === "chunk" ? { index } : {}),
+      ...(kind === "window" ? { index } : {}),
     }),
   });
 }
@@ -235,7 +251,7 @@ export function requestDownloadUrl(
 export function analyze(
   cfg: AgentConfig,
   body: {
-    chunks: AnalysisChunk[];
+    segments: TranscriptSegment[];
     clipLength: "short" | "medium";
     video: VideoInfo;
     videoTitle?: string;
@@ -247,11 +263,30 @@ export function analyze(
   });
 }
 
+export function transcribeJob(
+  cfg: AgentConfig,
+  jobId: string,
+  body: { bucket: string; objectKey: string },
+  signal?: AbortSignal,
+) {
+  return request<{
+    segments: TranscriptSegment[];
+    durationMinutes: number;
+    costUsd: number;
+    language: string;
+  }>(cfg, `/api/agent/jobs/${encodeURIComponent(jobId)}/transcribe`, {
+    method: "POST",
+    body: JSON.stringify(body),
+    signal,
+    dispatcher: analysisDispatcher,
+  });
+}
+
 export function analyzeJob(
   cfg: AgentConfig,
   jobId: string,
   body: {
-    chunks: AnalysisChunk[];
+    segments: TranscriptSegment[];
     clipLength: "short" | "medium";
     videoTitle?: string;
   },
@@ -260,6 +295,29 @@ export function analyzeJob(
   return request<ClipPlan>(
     cfg,
     `/api/agent/jobs/${encodeURIComponent(jobId)}/analyze`,
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+      signal,
+      dispatcher: analysisDispatcher,
+    },
+  );
+}
+
+export function refineJob(
+  cfg: AgentConfig,
+  jobId: string,
+  body: {
+    windows: ReviewWindow[];
+    clips: ClipPlanItem[];
+    clipLength: "short" | "medium";
+    videoTitle?: string;
+  },
+  signal?: AbortSignal,
+) {
+  return request<ClipPlan>(
+    cfg,
+    `/api/agent/jobs/${encodeURIComponent(jobId)}/refine`,
     {
       method: "POST",
       body: JSON.stringify(body),

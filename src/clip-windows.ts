@@ -1,4 +1,5 @@
-export const CLIP_WINDOW_PAD_SEC = 15;
+/** Extra video on each side of a detected moment. Gemini watches this file, and the renderer cuts the refined moment out of it. */
+export const CLIP_WINDOW_PAD_SEC = 60;
 
 export type TimedClip = {
   startSec: number;
@@ -11,7 +12,7 @@ export type ClipWindow = {
   durationSec: number;
 };
 
-/** Expand a detected clip by a few seconds so later recuts can nudge in/out. */
+/** Expand a detected clip by one minute on each side. */
 export function paddedClipWindow(clip: TimedClip, videoDurationSec: number): ClipWindow {
   const startSec = Math.max(0, clip.startSec - CLIP_WINDOW_PAD_SEC);
   const rawEnd = clip.endSec > clip.startSec ? clip.endSec : clip.startSec + clip.durationSec;

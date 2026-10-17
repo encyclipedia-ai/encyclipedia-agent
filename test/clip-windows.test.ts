@@ -2,19 +2,19 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { CLIP_WINDOW_PAD_SEC, paddedClipWindow } from "../src/clip-windows.js";
 
-test("paddedClipWindow adds pad on both sides and clamps to the file", () => {
+test("paddedClipWindow adds one minute on both sides", () => {
   const window = paddedClipWindow(
-    { startSec: 40, endSec: 70, durationSec: 30 },
-    120,
+    { startSec: 200, endSec: 230, durationSec: 30 },
+    1000,
   );
-  assert.equal(window.startSec, 40 - CLIP_WINDOW_PAD_SEC);
+  assert.equal(window.startSec, 200 - CLIP_WINDOW_PAD_SEC);
   assert.equal(window.durationSec, 30 + CLIP_WINDOW_PAD_SEC * 2);
 });
 
 test("paddedClipWindow does not start before zero", () => {
   const window = paddedClipWindow(
     { startSec: 5, endSec: 20, durationSec: 15 },
-    60,
+    1000,
   );
   assert.equal(window.startSec, 0);
   assert.equal(window.durationSec, 20 + CLIP_WINDOW_PAD_SEC);
