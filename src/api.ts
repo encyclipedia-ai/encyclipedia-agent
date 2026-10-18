@@ -434,6 +434,42 @@ export async function claimJob(cfg: AgentConfig): Promise<ClaimedJob | null> {
   return result ?? null;
 }
 
+export function renderClip(
+  cfg: AgentConfig,
+  jobId: string,
+  body: {
+    video?: VideoInfo;
+    window: ReviewWindow;
+    clip: ClipPlanItem;
+    costUsd?: number;
+    usageEvents?: UsageEvent[];
+    expectedCount?: number;
+  },
+  signal?: AbortSignal,
+) {
+  return request<{ jobId: string; status: string; clipCount: number }>(
+    cfg,
+    `/api/agent/jobs/${encodeURIComponent(jobId)}/render-clip`,
+    {
+      method: "POST",
+      body: JSON.stringify({ ...body, deviceId: cfg.deviceId }),
+      signal,
+    },
+  );
+}
+
+export function finishRender(cfg: AgentConfig, jobId: string, signal?: AbortSignal) {
+  return request<{ jobId: string; status: string }>(
+    cfg,
+    `/api/agent/jobs/${encodeURIComponent(jobId)}/finish-render`,
+    {
+      method: "POST",
+      body: JSON.stringify({}),
+      signal,
+    },
+  );
+}
+
 export function completeJob(
   cfg: AgentConfig,
   jobId: string,
