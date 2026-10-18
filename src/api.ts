@@ -444,6 +444,13 @@ export function renderClip(
     costUsd?: number;
     usageEvents?: UsageEvent[];
     expectedCount?: number;
+    roster?: Array<{
+      startSec: number;
+      endSec: number;
+      durationSec: number;
+      category?: string;
+      title?: string;
+    }>;
   },
   signal?: AbortSignal,
 ) {
