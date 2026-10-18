@@ -304,18 +304,12 @@ ipcMain.handle("helper:cancel-job", async (_evt, body: { id?: string }) => {
   return { ok: true };
 });
 
-ipcMain.handle(
-  "helper:clip-file",
-  async (_evt, body: { path?: string; clipLength?: "short" | "medium" }) => {
-    const filePath = body.path?.trim() ?? "";
-    if (!filePath) throw new Error("Choose a video file first.");
-    const item = await queueLocalFile(
-      filePath,
-      body.clipLength === "medium" ? "medium" : "short",
-    );
-    return { ok: true, id: item.id };
-  },
-);
+ipcMain.handle("helper:clip-file", async (_evt, body: { path?: string }) => {
+  const filePath = body.path?.trim() ?? "";
+  if (!filePath) throw new Error("Choose a video file first.");
+  const item = await queueLocalFile(filePath, "short");
+  return { ok: true, id: item.id };
+});
 
 app.whenReady().then(async () => {
   if (process.platform === "darwin") {

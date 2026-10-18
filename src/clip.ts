@@ -74,7 +74,7 @@ export async function ingestSource(
   cfg: AgentConfig,
   url: string,
   onLog?: LogFn,
-  opts?: { clipLength: "short" | "medium"; jobId?: string; signal?: AbortSignal },
+  opts?: { clipLength: "short"; jobId?: string; signal?: AbortSignal },
 ): Promise<void> {
   say(onLog, "Looking up the video…", { phase: "lookup", percent: null });
   const video = await dumpVideoInfo(url, opts?.signal);
@@ -237,7 +237,7 @@ async function analyzeSegments(
   cfg: AgentConfig,
   segments: api.TranscriptSegment[],
   video: api.VideoInfo,
-  clipLength: "short" | "medium",
+  clipLength: "short",
   jobId: string,
   onLog?: LogFn,
   signal?: AbortSignal,
@@ -269,7 +269,7 @@ async function releaseYoutubeClips(
   url: string,
   video: api.VideoInfo,
   clipPlan: api.ClipPlan,
-  clipLength: "short" | "medium",
+  clipLength: "short",
   jobId: string,
   workDir: string,
   onLog?: LogFn,
@@ -351,7 +351,7 @@ async function releaseLocalClips(
   video: api.VideoInfo,
   sourcePath: string,
   clipPlan: api.ClipPlan,
-  clipLength: "short" | "medium",
+  clipLength: "short",
   jobId: string,
   workDir: string,
   onLog?: LogFn,
@@ -420,7 +420,7 @@ async function releaseMoments(input: {
   jobId: string;
   video: api.VideoInfo;
   clipPlan: api.ClipPlan;
-  clipLength: "short" | "medium";
+  clipLength: "short";
   onLog?: LogFn;
   signal?: AbortSignal;
   prepareWindow: (clip: api.ClipPlanItem, index: number) => Promise<api.ReviewWindow>;
@@ -559,7 +559,7 @@ export async function handoffLocalFile(
     filePath: string;
     jobId: string;
     videoId: string;
-    clipLength: "short" | "medium";
+    clipLength: "short";
   },
   onLog?: LogFn,
   signal?: AbortSignal,
@@ -657,7 +657,7 @@ export async function handoffRemoteJob(
     const linked = combinedAbort([watch.signal, signal]);
     try {
       await ingestSource(cfg, claim.youtubeUrl, onLog, {
-        clipLength: claim.clipLength,
+        clipLength: "short",
         jobId: claim.jobId,
         signal: linked.signal,
       });
@@ -759,7 +759,7 @@ export async function handoffRecut(
 export async function runClip(
   cfg: AgentConfig,
   filePath: string,
-  clipLength: "short" | "medium",
+  clipLength: "short",
   onLog?: LogFn,
 ): Promise<void> {
   say(onLog, "Submitting…", { phase: "lookup" });

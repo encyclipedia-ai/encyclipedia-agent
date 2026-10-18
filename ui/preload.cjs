@@ -7,8 +7,7 @@ contextBridge.exposeInMainWorld("helper", {
     ipcRenderer.invoke("helper:sign-in", { email, password }),
   signInGoogle: () => ipcRenderer.invoke("helper:sign-in-google"),
   signOut: () => ipcRenderer.invoke("helper:sign-out"),
-  clipFile: (filePath, clipLength) =>
-    ipcRenderer.invoke("helper:clip-file", { path: filePath, clipLength }),
+  clipFile: (filePath) => ipcRenderer.invoke("helper:clip-file", { path: filePath }),
   pickClip: () => ipcRenderer.invoke("helper:pick-clip"),
   cancelJob: (id) => ipcRenderer.invoke("helper:cancel-job", { id }),
   onState: (fn) => {

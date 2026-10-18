@@ -339,23 +339,6 @@ button.ghost:hover:not(:disabled) {
   text-transform: uppercase;
 }
 
-.lengths {
-  margin: 0 0 12px;
-  gap: 16px;
-}
-
-.choice {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin: 0;
-  text-transform: none;
-  letter-spacing: 0;
-  color: var(--ink);
-  font-family: var(--font-body);
-  font-size: 14px;
-}
-
 .hidden {
   display: none;
 }

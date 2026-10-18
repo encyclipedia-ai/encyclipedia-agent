@@ -120,7 +120,7 @@ The CLI is optional:
 ```bash
 pnpm dev                 # interactive setup, sign-in, background install
 pnpm dev -- start        # stay in the foreground and claim work
-pnpm dev -- clip ./talk.mp4 [--length medium]
+pnpm dev -- clip ./talk.mp4
 pnpm dev -- stop
 pnpm dev -- logout
 pnpm dev -- uninstall

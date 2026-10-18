@@ -143,7 +143,7 @@ async function withWork<T>(fn: () => Promise<T>): Promise<T> {
 
 export async function queueLocalFile(
   filePath: string,
-  clipLength: "short" | "medium",
+  clipLength: "short",
 ): Promise<QueueItem> {
   const resolved = path.resolve(filePath.trim());
   await assertReadableVideo(resolved);
@@ -175,7 +175,7 @@ export async function queueLocalFile(
 
 export async function clipFromFile(
   filePath: string,
-  clipLength: "short" | "medium",
+  clipLength: "short",
   onLog: LogFn,
 ): Promise<void> {
   await ensureTools();
