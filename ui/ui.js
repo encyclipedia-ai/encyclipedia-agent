@@ -75,7 +75,8 @@ function renderQueue(items) {
     queued: 4,
     render: 5,
     error: 6,
-    done: 7,
+    cancelled: 7,
+    done: 8,
   };
   list.sort((a, b) => (rank[a.phase] ?? 9) - (rank[b.phase] ?? 9) || a.addedAt - b.addedAt);
   const waitingIds = list
@@ -120,6 +121,14 @@ function renderQueue(items) {
         ? `Waiting · ${position + 1} of ${waitingIds.length} in line`
         : item.detail || "";
     li.append(title, meta, detail);
+    if (!["done", "error", "cancelled"].includes(item.phase)) {
+      const cancel = document.createElement("button");
+      cancel.type = "button";
+      cancel.className = "queue-cancel";
+      cancel.dataset.cancelId = item.id;
+      cancel.textContent = "Cancel";
+      li.append(cancel);
+    }
     if (item.percent != null && (item.phase === "download" || item.phase === "upload")) {
       const bar = document.createElement("div");
       bar.className = "bar";
@@ -232,6 +241,15 @@ googleBtn.addEventListener("click", async () => {
 
 signOutBtn.addEventListener("click", () => {
   void window.helper.signOut();
+});
+
+queueEl.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-cancel-id]");
+  if (!button) return;
+  button.disabled = true;
+  void window.helper.cancelJob(button.dataset.cancelId).catch((err) => {
+    statusMessage.textContent = err instanceof Error ? err.message : String(err);
+  });
 });
 
 clipForm.addEventListener("submit", async (event) => {

@@ -462,6 +462,22 @@ button.ghost:hover:not(:disabled) {
   color: var(--text);
 }
 
+button.queue-cancel {
+  width: auto;
+  margin-top: 8px;
+  padding: 4px 10px;
+  background: transparent;
+  color: var(--bad);
+  border: 1px solid color-mix(in srgb, var(--bad) 45%, var(--line));
+  box-shadow: none;
+  font-size: 10px;
+}
+
+button.queue-cancel:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--bad) 12%, transparent);
+  color: var(--bad);
+}
+
 .queue-item.phase-error .queue-phase,
 .queue-item.phase-error .queue-detail,
 .queue-item.phase-cancelled .queue-phase,

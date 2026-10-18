@@ -17,6 +17,7 @@ import {
 import {
   activeMachineWork,
   clearUnfinishedQueue,
+  cancelQueueItem,
   enqueueLocal,
   enqueueRemote,
   getQueue,
@@ -24,6 +25,7 @@ import {
   onQueueChange,
   setQueueProcessor,
   updateQueueItem,
+  workSignal,
   type QueueItem,
 } from "./job-queue.js";
 import { ensureTools, refreshYtdlpIfNeeded } from "./tools.js";
@@ -182,6 +184,15 @@ export async function clipFromFile(
   await withWork(() => runClip(cfg, path.resolve(filePath.trim()), clipLength, onLog));
 }
 
+export async function cancelQueuedJob(itemId: string): Promise<void> {
+  const item = cancelQueueItem(itemId);
+  if (!item) return;
+  const jobId = item.cloudJobId ?? item.remoteJobId;
+  if (!jobId) return;
+  const cfg = await ensureFreshToken(loadConfig());
+  await api.cancelJob(cfg, jobId).catch(() => {});
+}
+
 export function startHelperLoop(onUpdate: HelperListener): () => void {
   sweepDownloadTemps();
   let stopped = false;
@@ -211,6 +222,8 @@ export function startHelperLoop(onUpdate: HelperListener): () => void {
       if (typeof update === "string") report({ detail: update });
       else report(update);
     };
+    const signal = workSignal(item.id);
+    if (signal.aborted) throw new JobCancelledError();
     let cloudJobId: string;
     if (item.remoteJobId) {
       const preview = await api.getJob(authed, item.remoteJobId);
@@ -232,6 +245,7 @@ export function startHelperLoop(onUpdate: HelperListener): () => void {
               clipLength: item.clipLength,
             },
             onLog,
+            signal,
           )
         : item.remoteJobId;
     } else if (item.remoteJobId) {
@@ -249,7 +263,7 @@ export function startHelperLoop(onUpdate: HelperListener): () => void {
       };
       if (isRecutClaim(claim)) {
         cloudJobId = jobNeedsLibrarianMedia(job.status)
-          ? await handoffRecut(authed, claim, onLog)
+          ? await handoffRecut(authed, claim, onLog, signal)
           : item.remoteJobId;
       } else if (!jobNeedsLibrarianMedia(job.status)) {
         cloudJobId = item.remoteJobId;
@@ -258,12 +272,12 @@ export function startHelperLoop(onUpdate: HelperListener): () => void {
           "This volume was submitted as a file on this computer. Choose the file in Librarian to continue.",
         );
       } else {
-        cloudJobId = await handoffRemoteJob(authed, claim, onLog);
+        cloudJobId = await handoffRemoteJob(authed, claim, onLog, signal);
       }
     } else {
       throw new Error("Choose a video file first.");
     }
-    void waitForWorker(authed, cloudJobId, onLog)
+    void waitForWorker(authed, cloudJobId, onLog, signal)
       .then(async () => {
         const finished = await api.getJob(authed, cloudJobId).catch(() => null);
         let editVersion: number | undefined;

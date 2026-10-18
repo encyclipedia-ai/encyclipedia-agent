@@ -50,6 +50,7 @@ export type QueueProcessor = (
 const KEEP_FINISHED = 15;
 const MACHINE_PHASES = new Set<WorkPhase>(["lookup", "download", "analyze", "upload"]);
 const TERMINAL_PHASES = new Set<WorkPhase>(["done", "error", "cancelled"]);
+const workControllers = new Map<string, AbortController>();
 
 function isFinishedPhase(phase: WorkPhase): boolean {
   return TERMINAL_PHASES.has(phase);
@@ -85,6 +86,9 @@ function trimFinished(): void {
 export function updateQueueItem(id: string, patch: QueuePatch): void {
   const item = items.find((row) => row.id === id);
   if (!item) return;
+  if (isFinishedPhase(item.phase)) {
+    if (!patch.phase || !isFinishedPhase(patch.phase)) return;
+  }
   const phaseChanged = patch.phase !== undefined && patch.phase !== item.phase;
   Object.assign(item, patch);
   const now = Date.now();
@@ -117,6 +121,34 @@ export function queueIsIdle(
 
 export function isQueueIdle(): boolean {
   return queueIsIdle(items, draining);
+}
+
+function workController(itemId: string): AbortController {
+  let controller = workControllers.get(itemId);
+  if (!controller) {
+    controller = new AbortController();
+    workControllers.set(itemId, controller);
+  }
+  return controller;
+}
+
+/** Abort signal for the queue row. Cancel aborts the same controller. */
+export function workSignal(itemId: string): AbortSignal {
+  return workController(itemId).signal;
+}
+
+/** Stop a queued or running row. Returns the row so the caller can cancel the cloud job. */
+export function cancelQueueItem(itemId: string): QueueItem | null {
+  const item = items.find((row) => row.id === itemId);
+  if (!item || isFinishedPhase(item.phase)) return null;
+  workController(itemId).abort();
+  updateQueueItem(itemId, {
+    phase: "cancelled",
+    percent: null,
+    detail: "Cancelled.",
+  });
+  const cancelled = items.find((row) => row.id === itemId);
+  return cancelled ? { ...cancelled } : null;
 }
 
 function makeItem(

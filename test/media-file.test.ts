@@ -4,6 +4,7 @@ import {
   isAllowedClipPath,
   isAllowedVideoPath,
   isMp4Path,
+  mediaDescriptionHasVideo,
   parseFfmpegDuration,
 } from "../src/media-file.js";
 
@@ -17,6 +18,14 @@ test("parseFfmpegDuration reads hours minutes and fractional seconds", () => {
 
 test("parseFfmpegDuration returns 0 when ffmpeg prints no duration", () => {
   assert.equal(parseFfmpegDuration("ffmpeg version 6.1.1"), 0);
+});
+
+test("mediaDescriptionHasVideo accepts a picture stream and rejects audio only", () => {
+  const video = "  Stream #0:0[0x1](und): Video: h264 (High), yuv420p, 1920x1080";
+  const audio = "  Stream #0:0[0x2](eng): Audio: aac (LC), 48000 Hz, stereo";
+  assert.equal(mediaDescriptionHasVideo(video), true);
+  assert.equal(mediaDescriptionHasVideo(`${audio}\n${video}`), true);
+  assert.equal(mediaDescriptionHasVideo(audio), false);
 });
 
 test("isAllowedClipPath accepts common desktop containers", () => {

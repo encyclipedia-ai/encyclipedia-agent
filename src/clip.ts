@@ -12,6 +12,7 @@ import {
   cutMediaSection,
   downloadToFile,
   extractAudioMp3,
+  fileHasVideoStream,
   prepareSourceMp4,
   probeMediaFile,
 } from "./media-file.js";
@@ -27,6 +28,24 @@ import {
 } from "./ytdlp.js";
 
 const TERMINAL = new Set(["done", "error", "cancelled"]);
+
+function combinedAbort(
+  signals: Array<AbortSignal | undefined>,
+): { signal: AbortSignal; stop: () => void } {
+  const controller = new AbortController();
+  const onAbort = () => controller.abort();
+  for (const signal of signals) {
+    if (!signal) continue;
+    if (signal.aborted) controller.abort();
+    else signal.addEventListener("abort", onAbort, { once: true });
+  }
+  return {
+    signal: controller.signal,
+    stop: () => {
+      for (const signal of signals) signal?.removeEventListener("abort", onAbort);
+    },
+  };
+}
 
 function shouldFailRemoteJob(err: unknown): boolean {
   return !isJobCancelledError(err) && !(err instanceof AgentApiError && err.status === 409);
@@ -293,6 +312,9 @@ async function releaseYoutubeClips(
             `window_${index}`,
             signal,
           );
+          if (!(await fileHasVideoStream(videoPath))) {
+            throw new Error("The downloaded section has no picture.");
+          }
         }
       } catch (err) {
         if (isJobCancelledError(err)) throw err;
@@ -482,9 +504,11 @@ export async function waitForWorker(
   cfg: AgentConfig,
   jobId: string,
   onLog?: LogFn,
+  signal?: AbortSignal,
 ): Promise<void> {
   say(onLog, "Renderer is preparing clips…", { phase: "render", percent: null });
   while (true) {
+    if (signal?.aborted) throw new JobCancelledError();
     const job = await api.getJob(cfg, jobId);
     say(onLog, job.progress || job.status, { phase: "render" });
     if (TERMINAL.has(job.status)) {
@@ -503,7 +527,25 @@ export async function waitForWorker(
       }
       return;
     }
-    await new Promise((r) => setTimeout(r, 3000));
+    await new Promise<void>((resolve, reject) => {
+      if (!signal) {
+        setTimeout(resolve, 3000);
+        return;
+      }
+      if (signal.aborted) {
+        reject(new JobCancelledError());
+        return;
+      }
+      const onAbort = () => {
+        clearTimeout(timer);
+        reject(new JobCancelledError());
+      };
+      const timer = setTimeout(() => {
+        signal.removeEventListener("abort", onAbort);
+        resolve();
+      }, 3000);
+      signal.addEventListener("abort", onAbort, { once: true });
+    });
   }
 }
 
@@ -520,6 +562,7 @@ export async function handoffLocalFile(
     clipLength: "short" | "medium";
   },
   onLog?: LogFn,
+  signal?: AbortSignal,
 ): Promise<string> {
   const { filePath, jobId, videoId } = opts;
   await assertReadableVideo(filePath);
@@ -532,6 +575,7 @@ export async function handoffLocalFile(
   }
 
   const watch = api.watchJobCancellation(cfg, jobId);
+  const linked = combinedAbort([watch.signal, signal]);
   sweepDownloadTemps();
   const workDir = await fs.mkdtemp(path.join(os.tmpdir(), "encyclipedia-agent-"));
   try {
@@ -556,7 +600,7 @@ export async function handoffLocalFile(
       jobId,
       audioPath,
       onLog,
-      watch.signal,
+      linked.signal,
     );
     const clipPlan = await analyzeSegments(
       cfg,
@@ -565,7 +609,7 @@ export async function handoffLocalFile(
       opts.clipLength,
       jobId,
       onLog,
-      watch.signal,
+      linked.signal,
     );
     await releaseLocalClips(
       cfg,
@@ -576,7 +620,7 @@ export async function handoffLocalFile(
       jobId,
       workDir,
       onLog,
-      watch.signal,
+      linked.signal,
     );
     return jobId;
   } catch (err) {
@@ -586,6 +630,7 @@ export async function handoffLocalFile(
     }
     throw err;
   } finally {
+    linked.stop();
     watch.stop();
     await fs.rm(workDir, { recursive: true, force: true }).catch(() => {});
   }
@@ -595,6 +640,7 @@ export async function handoffRemoteJob(
   cfg: AgentConfig,
   claim: api.ClaimedJob,
   onLog?: LogFn,
+  signal?: AbortSignal,
 ): Promise<string> {
   if (isRecutClaim(claim)) {
     await api.failJob(cfg, claim.jobId, RECUT_NOT_FULL_VOD).catch(() => {});
@@ -608,14 +654,16 @@ export async function handoffRemoteJob(
   }
   try {
     const watch = api.watchJobCancellation(cfg, claim.jobId);
+    const linked = combinedAbort([watch.signal, signal]);
     try {
       await ingestSource(cfg, claim.youtubeUrl, onLog, {
         clipLength: claim.clipLength,
         jobId: claim.jobId,
-        signal: watch.signal,
+        signal: linked.signal,
       });
       return claim.jobId;
     } finally {
+      linked.stop();
       watch.stop();
     }
   } catch (err) {
@@ -631,6 +679,7 @@ export async function handoffRecut(
   cfg: AgentConfig,
   claim: api.ClaimedJob,
   onLog?: LogFn,
+  signal?: AbortSignal,
 ): Promise<string> {
   const startSec = Number(claim.startSec);
   const durationSec = Number(claim.durationSec);
@@ -641,27 +690,34 @@ export async function handoffRecut(
   try {
     if (claim.title) say(onLog, claim.title, { title: claim.title });
     const watch = api.watchJobCancellation(cfg, claim.jobId);
+    const linked = combinedAbort([watch.signal, signal]);
     sweepDownloadTemps();
     const workDir = await fs.mkdtemp(path.join(os.tmpdir(), "encyclipedia-agent-"));
     try {
       say(onLog, "Downloading the edit window…", { phase: "download", percent: 0 });
-      const videoPath = isLocalFileIngest(claim)
-        ? await downloadLocalRecutSource(cfg, claim, workDir, onLog)
-        : await downloadSection(
-            claim.youtubeUrl,
-            startSec,
-            durationSec,
-            workDir,
-            (update) => {
-              onLog?.({
-                phase: "download",
-                percent: update.percent,
-                detail: update.detail,
-              });
-            },
-            "recut",
-            watch.signal,
-          );
+      let videoPath: string;
+      if (isLocalFileIngest(claim)) {
+        videoPath = await downloadLocalRecutSource(cfg, claim, workDir, onLog);
+      } else {
+        videoPath = await downloadSection(
+          claim.youtubeUrl,
+          startSec,
+          durationSec,
+          workDir,
+          (update) => {
+            onLog?.({
+              phase: "download",
+              percent: update.percent,
+              detail: update.detail,
+            });
+          },
+          "recut",
+          linked.signal,
+        );
+        if (!(await fileHasVideoStream(videoPath))) {
+          throw new Error("The downloaded section has no picture.");
+        }
+      }
       say(onLog, "Uploading the clip window…", { phase: "upload", percent: 0 });
       const target = await api.requestUploadUrl(cfg, claim.jobId, "recut", "video/mp4");
       await putFile(
@@ -674,7 +730,7 @@ export async function handoffRecut(
             detail: `Uploading ${percent}% · ${formatBytes(sent)} of ${formatBytes(total)}`,
           });
         },
-        watch.signal,
+        linked.signal,
       );
       say(onLog, "Handing the edit to the renderer…", { phase: "upload", percent: 100 });
       await api.completeJob(
@@ -683,10 +739,11 @@ export async function handoffRecut(
         {
           source: { bucket: target.bucket, objectKey: target.objectKey },
         },
-        watch.signal,
+        linked.signal,
       );
       return claim.jobId;
     } finally {
+      linked.stop();
       watch.stop();
       await fs.rm(workDir, { recursive: true, force: true }).catch(() => {});
     }
