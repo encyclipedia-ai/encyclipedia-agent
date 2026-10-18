@@ -453,6 +453,13 @@ async function releaseMoments(input: {
         costUsd,
         usageEvents,
         expectedCount: total,
+        roster: clipPlan.clips.map((item) => ({
+          startSec: item.startSec,
+          endSec: item.endSec,
+          durationSec: item.durationSec,
+          ...(item.category ? { category: item.category } : {}),
+          title: item.title,
+        })),
       };
       try {
         await api.renderClip(cfg, jobId, renderBody, signal);
