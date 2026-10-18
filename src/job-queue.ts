@@ -19,7 +19,7 @@ export interface QueueItem {
   title: string | null;
   source: "local" | "remote";
   kind?: "process" | "recut";
-  clipLength: "short" | "medium";
+  clipLength: "short";
   remoteJobId?: string;
   cloudJobId?: string;
   localPath?: string;
@@ -185,7 +185,7 @@ function makeItem(
 
 export function enqueueLocal(
   url: string,
-  clipLength: "short" | "medium",
+  clipLength: "short",
   opts?: {
     remoteJobId?: string;
     localPath?: string;
@@ -224,7 +224,7 @@ export function enqueueLocal(
 export function enqueueRemote(claim: {
   jobId: string;
   youtubeUrl: string;
-  clipLength: "short" | "medium";
+  clipLength: "short";
   kind?: "process" | "recut";
   startSec?: number;
   durationSec?: number;
@@ -237,7 +237,7 @@ export function enqueueRemote(claim: {
   }
   const item = makeItem({
     url: claim.youtubeUrl,
-    clipLength: claim.clipLength,
+    clipLength: "short",
     source: "remote",
     remoteJobId: claim.jobId,
     kind: isRecutClaim(claim) ? "recut" : "process",

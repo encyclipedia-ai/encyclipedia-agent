@@ -254,12 +254,11 @@ queueEl.addEventListener("click", (event) => {
 
 clipForm.addEventListener("submit", async (event) => {
   event.preventDefault();
-  const length = document.querySelector('input[name="length"]:checked')?.value ?? "short";
   clipBtn.disabled = true;
   try {
     const picked = await window.helper.pickClip();
     if (!picked || picked.cancelled || !picked.path) return;
-    await window.helper.clipFile(picked.path, length);
+    await window.helper.clipFile(picked.path);
   } catch (err) {
     statusMessage.textContent = err instanceof Error ? err.message : String(err);
   } finally {

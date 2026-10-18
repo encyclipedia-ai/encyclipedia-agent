@@ -252,7 +252,7 @@ export function analyze(
   cfg: AgentConfig,
   body: {
     segments: TranscriptSegment[];
-    clipLength: "short" | "medium";
+    clipLength: "short";
     video: VideoInfo;
     videoTitle?: string;
   },
@@ -287,7 +287,7 @@ export function analyzeJob(
   jobId: string,
   body: {
     segments: TranscriptSegment[];
-    clipLength: "short" | "medium";
+    clipLength: "short";
     videoTitle?: string;
   },
   signal?: AbortSignal,
@@ -310,7 +310,7 @@ export function refineJob(
   body: {
     windows: ReviewWindow[];
     clips: ClipPlanItem[];
-    clipLength: "short" | "medium";
+    clipLength: "short";
     videoTitle?: string;
   },
   signal?: AbortSignal,
@@ -330,8 +330,8 @@ export function refineJob(
 export function submitProcess(
   cfg: AgentConfig,
   body:
-    | { url: string; clipLength: "short" | "medium" }
-    | { localFile: { displayName: string }; clipLength: "short" | "medium" },
+    | { url: string; clipLength: "short" }
+    | { localFile: { displayName: string }; clipLength: "short" },
 ) {
   return request<{ jobId: string; status: string; deduped?: boolean; videoId?: string }>(
     cfg,
@@ -347,7 +347,7 @@ export function submitJob(
   cfg: AgentConfig,
   body: {
     url: string;
-    clipLength: "short" | "medium";
+    clipLength: "short";
     video: VideoInfo;
     source: JobSource;
     clipPlan?: ClipPlan;
@@ -423,7 +423,7 @@ export function getStream(cfg: AgentConfig, slug: string) {
 export interface ClaimedJob {
   jobId: string;
   youtubeUrl: string;
-  clipLength: "short" | "medium";
+  clipLength: "short";
   videoId: string | null;
   kind?: "process" | "recut";
   ingestKind?: "local_file";
@@ -437,7 +437,9 @@ export async function claimJob(cfg: AgentConfig): Promise<ClaimedJob | null> {
     method: "POST",
     body: JSON.stringify({ deviceId: cfg.deviceId, supportsRecut: true }),
   });
-  return result ?? null;
+  if (!result) return null;
+  // Older jobs may say "medium". Clips are always short.
+  return { ...result, clipLength: "short" };
 }
 
 export function renderClip(

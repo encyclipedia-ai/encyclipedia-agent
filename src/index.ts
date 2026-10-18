@@ -135,12 +135,17 @@ async function main(): Promise<void> {
       console.log("Signed out.");
       break;
     case "clip": {
-      const filePath = rest.find((a) => !a.startsWith("--"));
+      const args: string[] = [];
+      for (let i = 0; i < rest.length; i++) {
+        if (rest[i] === "--length") {
+          i += 1;
+          continue;
+        }
+        args.push(rest[i]!);
+      }
+      const filePath = args.find((a) => !a.startsWith("--"));
       if (!filePath) usage();
-      let length: "short" | "medium" = "short";
-      const li = rest.indexOf("--length");
-      if (li >= 0 && rest[li + 1] === "medium") length = "medium";
-      await clipFromFile(filePath, length, (update) =>
+      await clipFromFile(filePath, "short", (update) =>
         console.log(typeof update === "string" ? update : update.detail ?? ""),
       );
       break;
