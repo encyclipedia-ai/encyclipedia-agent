@@ -8,6 +8,7 @@ import {
 import { loadConfig } from "./config.js";
 import {
   completeGoogleSignIn,
+  cancelQueuedJob,
   queueLocalFile,
   restoreSession,
   signIn,
@@ -294,6 +295,13 @@ ipcMain.handle("helper:pick-clip", async () => {
     return { cancelled: true as const };
   }
   return { cancelled: false as const, path: result.filePaths[0] };
+});
+
+ipcMain.handle("helper:cancel-job", async (_evt, body: { id?: string }) => {
+  const id = body.id?.trim() ?? "";
+  if (!id) throw new Error("That job is no longer in the queue.");
+  await cancelQueuedJob(id);
+  return { ok: true };
 });
 
 ipcMain.handle(

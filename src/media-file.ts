@@ -21,6 +21,11 @@ export function isAllowedClipPath(filePath: string): boolean {
 }
 
 /** Parse `Duration: HH:MM:SS.xx` from ffmpeg `-i` stderr. Returns 0 if missing. */
+/** True when ffmpeg `-i` printed a video stream. Audio-only mp4s do not. */
+export function mediaDescriptionHasVideo(stderr: string): boolean {
+  return /^ {0,2}Stream #\d+:\d+.*:\s*Video:/m.test(stderr);
+}
+
 export function parseFfmpegDuration(stderr: string): number {
   const match = stderr.match(DURATION_RE);
   if (!match) return 0;
@@ -65,6 +70,11 @@ function runFfmpeg(args: string[]): Promise<{ code: number; stderr: string }> {
       resolve({ code: code ?? 1, stderr });
     });
   });
+}
+
+export async function fileHasVideoStream(filePath: string): Promise<boolean> {
+  const { stderr } = await runFfmpeg(["-hide_banner", "-i", filePath]);
+  return mediaDescriptionHasVideo(stderr);
 }
 
 export async function probeMediaDuration(filePath: string): Promise<number> {

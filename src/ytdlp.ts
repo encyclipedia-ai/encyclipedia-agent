@@ -219,6 +219,31 @@ function abortError(): Error {
   return err;
 }
 
+/** yt-dlp's ffmpeg child keeps downloading if only the parent is signalled. */
+function terminateChildTree(
+  child: ReturnType<typeof spawn>,
+  signal: NodeJS.Signals,
+): void {
+  const pid = child.pid;
+  if (!pid) return;
+  if (process.platform === "win32") {
+    spawn("taskkill", ["/PID", String(pid), "/T", "/F"], {
+      stdio: "ignore",
+      windowsHide: true,
+    }).unref();
+    return;
+  }
+  try {
+    process.kill(-pid, signal);
+  } catch {
+    try {
+      child.kill(signal);
+    } catch {
+      /* already exited */
+    }
+  }
+}
+
 function spawnYtdlp(
   argv: string[],
   opts: RunOpts = {},
@@ -243,17 +268,14 @@ function spawnYtdlp(
           cwd: opts.cwd,
           env: ytdlpEnv(),
           stdio: ["ignore", "pipe", "pipe"],
+          detached: process.platform !== "win32",
         });
         let aborted = false;
         const onAbort = () => {
           aborted = true;
-          child.kill("SIGTERM");
+          terminateChildTree(child, "SIGTERM");
           setTimeout(() => {
-            try {
-              child.kill("SIGKILL");
-            } catch {
-              /* already exited */
-            }
+            terminateChildTree(child, "SIGKILL");
           }, 2000).unref();
         };
         opts.signal?.addEventListener("abort", onAbort, { once: true });
@@ -613,6 +635,31 @@ function recutYoutubeFormat(): string {
   return "bestvideo[height<=1080]+bestaudio/best[height<=1080]";
 }
 
+/** Prefer ordinary HTTPS media over HLS. ffmpeg cannot seek YouTube m3u8 playlists, so a mid-video section comes back as audio only. */
+export const HTTPS_FORMAT_SORT = ["-S", "proto:https"] as const;
+
+export function youtubeSectionArgs(input: {
+  section: string;
+  format: string;
+  output: string;
+}): string[] {
+  return [
+    "--newline",
+    "--no-playlist",
+    "--no-part",
+    ...HTTPS_FORMAT_SORT,
+    "--download-sections",
+    input.section,
+    "-f",
+    input.format,
+    "--merge-output-format",
+    "mp4",
+    "--force-keyframes-at-cuts",
+    "--output",
+    input.output,
+  ];
+}
+
 function formatSectionTime(totalSeconds: number): string {
   const h = Math.floor(totalSeconds / 3600);
   const m = Math.floor((totalSeconds % 3600) / 60);
@@ -633,21 +680,11 @@ export async function downloadSection(
   fs.mkdirSync(workDir, { recursive: true });
   const output = path.join(workDir, `${outputStem}.%(ext)s`);
   const section = `*${formatSectionTime(startSec)}-${formatSectionTime(startSec + durationSec)}`;
-  const format = recutYoutubeFormat();
-  const argv = [
-    "--newline",
-    "--no-playlist",
-    "--no-part",
-    "--download-sections",
+  const argv = youtubeSectionArgs({
     section,
-    "-f",
-    format,
-    "--merge-output-format",
-    "mp4",
-    "--force-keyframes-at-cuts",
-    "--output",
+    format: recutYoutubeFormat(),
     output,
-  ];
+  });
 
   await run([...argv, url], { cwd: workDir, onProgress, signal });
 
@@ -748,6 +785,7 @@ export async function downloadSource(
 
   const format = youtubeFormat();
   const formatArgs = [
+    ...HTTPS_FORMAT_SORT,
     "-f",
     format,
     "--merge-output-format",

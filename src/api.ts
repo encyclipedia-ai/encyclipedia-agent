@@ -363,6 +363,12 @@ export function submitJob(
   );
 }
 
+export function cancelJob(cfg: AgentConfig, jobId: string) {
+  return request<{ cancelled: boolean }>(cfg, `/api/jobs/${encodeURIComponent(jobId)}`, {
+    method: "DELETE",
+  });
+}
+
 export function getJob(cfg: AgentConfig, jobId: string) {
   return request<{
     id: string;

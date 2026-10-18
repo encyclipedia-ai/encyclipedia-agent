@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld("helper", {
   clipFile: (filePath, clipLength) =>
     ipcRenderer.invoke("helper:clip-file", { path: filePath, clipLength }),
   pickClip: () => ipcRenderer.invoke("helper:pick-clip"),
+  cancelJob: (id) => ipcRenderer.invoke("helper:cancel-job", { id }),
   onState: (fn) => {
     const listener = (_event, snap) => fn(snap);
     ipcRenderer.on("helper:state", listener);

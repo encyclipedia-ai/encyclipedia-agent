@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { enqueueLocal, getQueue, queueIsIdle, type WorkPhase } from "../src/job-queue.js";
+import {
+  cancelQueueItem,
+  enqueueLocal,
+  getQueue,
+  queueIsIdle,
+  updateQueueItem,
+  workSignal,
+  type WorkPhase,
+} from "../src/job-queue.js";
 
 test("queue is idle when it is empty or all jobs are terminal", () => {
   assert.equal(queueIsIdle([], false), true);
@@ -41,4 +49,19 @@ test("local jobs keep the filesystem path and display name", () => {
   assert.equal(item.title, "lecture.mp4");
   assert.equal(item.ingestKind, "local_file");
   assert.equal(getQueue().some((row) => row.id === item.id && row.localPath === "/tmp/lecture.mp4"), true);
+});
+
+test("cancel aborts the row and later progress cannot revive it", () => {
+  const item = enqueueLocal("https://www.youtube.com/watch?v=cancel-me", "short", {
+    remoteJobId: "job-cancel-1",
+    title: "Cancel me",
+  });
+  const signal = workSignal(item.id);
+  updateQueueItem(item.id, { phase: "download", detail: "Downloading clip window 3/10…" });
+  const cancelled = cancelQueueItem(item.id);
+  assert.equal(cancelled?.phase, "cancelled");
+  assert.equal(signal.aborted, true);
+  updateQueueItem(item.id, { phase: "download", detail: "Downloading clip window 4/10…" });
+  assert.equal(getQueue().find((row) => row.id === item.id)?.phase, "cancelled");
+  assert.equal(cancelQueueItem(item.id), null);
 });
