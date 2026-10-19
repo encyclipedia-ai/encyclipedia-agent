@@ -89,11 +89,18 @@ export interface ClipCategoryGroup {
   clipIndexes: number[];
 }
 
+export interface StoryScene {
+  startSec: number;
+  endSec: number;
+}
+
 export interface ClipPlan {
   clips: ClipPlanItem[];
   costUsd: number;
   usageEvents?: UsageEvent[];
   categories?: ClipCategoryGroup[];
+  /** Transcript chapters for the stream VOD. Older plans omit this. */
+  story?: StoryScene[];
 }
 
 export interface ReviewWindow {
@@ -471,13 +478,18 @@ export function renderClip(
   );
 }
 
-export function finishRender(cfg: AgentConfig, jobId: string, signal?: AbortSignal) {
+export function finishRender(
+  cfg: AgentConfig,
+  jobId: string,
+  signal?: AbortSignal,
+  storyWindows?: ReviewWindow[],
+) {
   return request<{ jobId: string; status: string }>(
     cfg,
     `/api/agent/jobs/${encodeURIComponent(jobId)}/finish-render`,
     {
       method: "POST",
-      body: JSON.stringify({}),
+      body: JSON.stringify(storyWindows?.length ? { storyWindows } : {}),
       signal,
     },
   );
