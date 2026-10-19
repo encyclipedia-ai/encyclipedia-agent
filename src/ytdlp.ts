@@ -328,49 +328,7 @@ function spawnYtdlp(
             resolve({ stdout, stderr });
             return;
           }
-          const lines = stderr.trim().split("\n");
-          const errorLine =
-            [...lines].reverse().find((line) => /ERROR:/i.test(line)) ??
-            lines.slice(-3).join("\n");
-          const detail = errorLine.replace(/^ERROR:\s*/i, "").trim();
-          const haystack = `${detail}\n${stderr}`;
-          if (/No space left on device|ENOSPC|Errno 28/i.test(haystack)) {
-            reject(new NoSpaceError());
-            return;
-          }
-          if (/sign in to confirm your age|age-restricted|confirm your age/i.test(haystack)) {
-            reject(new AgeRestrictedError());
-            return;
-          }
-          if (
-            /sign in to confirm you(?:'|’)re not a bot|use --cookies-from-browser|use --cookies for the authentication|login required/i.test(
-              haystack,
-            )
-          ) {
-            reject(new YoutubeAuthRequiredError());
-            return;
-          }
-          if (/The page needs to be reloaded/i.test(haystack)) {
-            reject(new FormatUnavailableError(detail));
-            return;
-          }
-          if (/429|Too Many Requests/i.test(haystack)) {
-            reject(new YoutubeRateLimitedError());
-            return;
-          }
-          if (/403|Forbidden/i.test(detail)) {
-            reject(new YoutubeBlockedError());
-            return;
-          }
-          if (/Requested format is not available/i.test(haystack)) {
-            reject(new FormatUnavailableError(detail));
-            return;
-          }
-          if (/Conversion failed|merg(e|ing).*fail/i.test(haystack)) {
-            reject(new MergeFailedError());
-            return;
-          }
-          reject(new Error(detail || `Could not download the video (exit ${code}).`));
+          reject(failureFromYtdlpOutput(stderr, code ?? 1));
         });
   });
 }
@@ -627,16 +585,22 @@ function clearMediaFiles(workDir: string): void {
   }
 }
 
-function recutYoutubeFormat(): string {
-  const free = tmpFreeBytes();
-  if (free < 200 * 1024 * 1024) {
-    throw new NoSpaceError();
-  }
-  return "bestvideo[height<=1080]+bestaudio/best[height<=1080]";
-}
-
 /** Prefer ordinary HTTPS media over HLS. ffmpeg cannot seek YouTube m3u8 playlists, so a mid-video section comes back as audio only. */
 export const HTTPS_FORMAT_SORT = ["-S", "proto:https"] as const;
+
+/**
+ * H.264 so a window can be copied. The best 1080p track is often AV1, and
+ * ffmpeg then software-decodes the whole VOD to cut one window.
+ */
+export function sectionYoutubeFormat(): string {
+  return [
+    "bestvideo[height<=1080][vcodec^=avc1]+bestaudio",
+    "bestvideo[height<=720][vcodec^=avc1]+bestaudio",
+    "best[height<=1080][vcodec^=avc1]",
+    "bestvideo[height<=1080]+bestaudio",
+    "best[height<=1080]",
+  ].join("/");
+}
 
 export function youtubeSectionArgs(input: {
   section: string;
@@ -654,10 +618,52 @@ export function youtubeSectionArgs(input: {
     input.format,
     "--merge-output-format",
     "mp4",
-    "--force-keyframes-at-cuts",
     "--output",
     input.output,
   ];
+}
+
+/**
+ * yt-dlp reports a refused section as "ffmpeg exited with code 1". The 403
+ * itself is on an earlier line, and that has to count or Librarian skips the
+ * player retry and downloads the whole VOD.
+ */
+export function failureFromYtdlpOutput(stderr: string, code: number): Error {
+  const lines = stderr.trim().split("\n");
+  const errorLine =
+    [...lines].reverse().find((line) => /ERROR:/i.test(line)) ??
+    lines.slice(-3).join("\n");
+  const detail = errorLine.replace(/^ERROR:\s*/i, "").trim();
+  const haystack = `${detail}\n${stderr}`;
+  if (/No space left on device|ENOSPC|Errno 28/i.test(haystack)) {
+    return new NoSpaceError();
+  }
+  if (/sign in to confirm your age|age-restricted|confirm your age/i.test(haystack)) {
+    return new AgeRestrictedError();
+  }
+  if (
+    /sign in to confirm you(?:'|’)re not a bot|use --cookies-from-browser|use --cookies for the authentication|login required/i.test(
+      haystack,
+    )
+  ) {
+    return new YoutubeAuthRequiredError();
+  }
+  if (/The page needs to be reloaded/i.test(haystack)) {
+    return new FormatUnavailableError(detail);
+  }
+  if (/429|Too Many Requests/i.test(haystack)) {
+    return new YoutubeRateLimitedError();
+  }
+  if (/403|Forbidden/i.test(haystack)) {
+    return new YoutubeBlockedError();
+  }
+  if (/Requested format is not available/i.test(haystack)) {
+    return new FormatUnavailableError(detail);
+  }
+  if (/Conversion failed|merg(e|ing).*fail/i.test(haystack)) {
+    return new MergeFailedError();
+  }
+  return new Error(detail || `Could not download the video (exit ${code}).`);
 }
 
 function formatSectionTime(totalSeconds: number): string {
@@ -682,7 +688,7 @@ export async function downloadSection(
   const section = `*${formatSectionTime(startSec)}-${formatSectionTime(startSec + durationSec)}`;
   const argv = youtubeSectionArgs({
     section,
-    format: recutYoutubeFormat(),
+    format: sectionYoutubeFormat(),
     output,
   });
 
