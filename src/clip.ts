@@ -277,6 +277,33 @@ async function releaseYoutubeClips(
   signal?: AbortSignal,
 ): Promise<void> {
   let localSource: string | undefined;
+  let localDownload: Promise<string> | undefined;
+  const ensureLocalSource = (): Promise<string> => {
+    if (localSource) return Promise.resolve(localSource);
+    if (!localDownload) {
+      localDownload = downloadSource(
+        url,
+        workDir,
+        (update) => {
+          onLog?.({
+            phase: "download",
+            percent: update.percent,
+            detail: update.detail,
+          });
+        },
+        signal,
+      )
+        .then((downloaded) => {
+          localSource = downloaded.videoPath;
+          return localSource;
+        })
+        .catch((err) => {
+          localDownload = undefined;
+          throw err;
+        });
+    }
+    return localDownload;
+  };
   const sectionFile = async (
     startSec: number,
     durationSec: number,
@@ -314,23 +341,9 @@ async function releaseYoutubeClips(
         onLog,
         `Section download failed (${message}). Downloading locally to cut windows — the full file stays on this computer.`,
       );
-      if (!localSource) {
-        const downloaded = await downloadSource(
-          url,
-          workDir,
-          (update) => {
-            onLog?.({
-              phase: "download",
-              percent: update.percent,
-              detail: update.detail,
-            });
-          },
-          signal,
-        );
-        localSource = downloaded.videoPath;
-      }
+      const source = await ensureLocalSource();
       const videoPath = path.join(workDir, `${name}.mp4`);
-      await cutMediaSection(localSource, startSec, durationSec, videoPath);
+      await cutMediaSection(source, startSec, durationSec, videoPath);
       return videoPath;
     }
   };
