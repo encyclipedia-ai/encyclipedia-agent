@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { CLIP_WINDOW_PAD_SEC, paddedClipWindow } from "../src/clip-windows.js";
+import { CLIP_WINDOW_PAD_SEC, MAX_UPLOAD_WINDOW_SEC, paddedClipWindow, scenesWithoutClip, uploadWindowForClip } from "../src/clip-windows.js";
 
 test("paddedClipWindow adds one minute on both sides", () => {
   const window = paddedClipWindow(
@@ -18,6 +18,38 @@ test("paddedClipWindow does not start before zero", () => {
   );
   assert.equal(window.startSec, 0);
   assert.equal(window.durationSec, 20 + CLIP_WINDOW_PAD_SEC);
+});
+
+test("uploadWindowForClip covers the transcript scene around the short", () => {
+  const window = uploadWindowForClip(
+    { startSec: 200, endSec: 220, durationSec: 20 },
+    [{ startSec: 120, endSec: 280 }],
+    1000,
+  );
+  assert.equal(window.startSec, 120);
+  assert.equal(window.durationSec, 160);
+});
+
+test("uploadWindowForClip stays within the review limit", () => {
+  const window = uploadWindowForClip(
+    { startSec: 500, endSec: 520, durationSec: 20 },
+    [{ startSec: 0, endSec: 900 }],
+    2000,
+  );
+  assert.ok(window.durationSec <= MAX_UPLOAD_WINDOW_SEC);
+  assert.ok(window.startSec <= 500);
+  assert.ok(window.startSec + window.durationSec >= 520);
+});
+
+test("scenesWithoutClip keeps moments that no short lands in", () => {
+  const missing = scenesWithoutClip(
+    [
+      { startSec: 10, endSec: 70 },
+      { startSec: 200, endSec: 240 },
+    ],
+    [{ startSec: 40, endSec: 55, durationSec: 15 }],
+  );
+  assert.deepEqual(missing, [{ startSec: 200, endSec: 240 }]);
 });
 
 test("paddedClipWindow does not extend past the video duration", () => {

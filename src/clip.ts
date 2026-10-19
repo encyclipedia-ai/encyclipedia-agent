@@ -16,7 +16,7 @@ import {
   prepareSourceMp4,
   probeMediaFile,
 } from "./media-file.js";
-import { paddedClipWindow } from "./clip-windows.js";
+import { scenesWithoutClip, uploadWindowForClip } from "./clip-windows.js";
 import { putFile } from "./upload.js";
 import {
   downloadAudio,
@@ -276,6 +276,63 @@ async function releaseYoutubeClips(
   signal?: AbortSignal,
 ): Promise<void> {
   let localSource: string | undefined;
+  const sectionFile = async (
+    startSec: number,
+    durationSec: number,
+    name: string,
+  ): Promise<string> => {
+    try {
+      if (localSource) {
+        const videoPath = path.join(workDir, `${name}.mp4`);
+        await cutMediaSection(localSource, startSec, durationSec, videoPath);
+        return videoPath;
+      }
+      const videoPath = await downloadSection(
+        url,
+        startSec,
+        durationSec,
+        workDir,
+        (update) => {
+          onLog?.({
+            phase: "download",
+            percent: update.percent,
+            detail: update.detail,
+          });
+        },
+        name,
+        signal,
+      );
+      if (!(await fileHasVideoStream(videoPath))) {
+        throw new Error("The downloaded section has no picture.");
+      }
+      return videoPath;
+    } catch (err) {
+      if (isJobCancelledError(err)) throw err;
+      const message = err instanceof Error ? err.message : String(err);
+      say(
+        onLog,
+        `Section download failed (${message}). Downloading locally to cut windows — the full file stays on this computer.`,
+      );
+      if (!localSource) {
+        const downloaded = await downloadSource(
+          url,
+          workDir,
+          (update) => {
+            onLog?.({
+              phase: "download",
+              percent: update.percent,
+              detail: update.detail,
+            });
+          },
+          signal,
+        );
+        localSource = downloaded.videoPath;
+      }
+      const videoPath = path.join(workDir, `${name}.mp4`);
+      await cutMediaSection(localSource, startSec, durationSec, videoPath);
+      return videoPath;
+    }
+  };
   await releaseMoments({
     cfg,
     jobId,
@@ -285,64 +342,25 @@ async function releaseYoutubeClips(
     onLog,
     signal,
     prepareWindow: async (clip, index) => {
-      const padded = paddedClipWindow(clip, video.duration);
+      const padded = uploadWindowForClip(clip, clipPlan.story, video.duration);
       const total = clipPlan.clips.length;
       say(onLog, `Downloading clip window ${index + 1}/${total}…`, {
         phase: "download",
         percent: 0,
       });
-      let videoPath: string;
-      try {
-        if (localSource) {
-          videoPath = path.join(workDir, `window_${index}.mp4`);
-          await cutMediaSection(localSource, padded.startSec, padded.durationSec, videoPath);
-        } else {
-          videoPath = await downloadSection(
-            url,
-            padded.startSec,
-            padded.durationSec,
-            workDir,
-            (update) => {
-              onLog?.({
-                phase: "download",
-                percent: update.percent,
-                detail: update.detail,
-              });
-            },
-            `window_${index}`,
-            signal,
-          );
-          if (!(await fileHasVideoStream(videoPath))) {
-            throw new Error("The downloaded section has no picture.");
-          }
-        }
-      } catch (err) {
-        if (isJobCancelledError(err)) throw err;
-        const message = err instanceof Error ? err.message : String(err);
-        say(
-          onLog,
-          `Section download failed (${message}). Downloading locally to cut windows — the full file stays on this computer.`,
-        );
-        if (!localSource) {
-          const downloaded = await downloadSource(
-            url,
-            workDir,
-            (update) => {
-              onLog?.({
-                phase: "download",
-                percent: update.percent,
-                detail: update.detail,
-              });
-            },
-            signal,
-          );
-          localSource = downloaded.videoPath;
-        }
-        videoPath = path.join(workDir, `window_${index}.mp4`);
-        await cutMediaSection(localSource, padded.startSec, padded.durationSec, videoPath);
-      }
-      return uploadWindow(cfg, video.id, videoPath, padded, index, total, onLog, signal);
+      const videoPath = await sectionFile(padded.startSec, padded.durationSec, `window_${index}`);
+      return uploadWindow(cfg, video.id, videoPath, padded, index, index, total, "clip window", onLog, signal);
     },
+    prepareStoryWindows: () =>
+      uploadStoryScenes({
+        cfg,
+        videoId: video.id,
+        scenes: scenesWithoutClip(clipPlan.story, clipPlan.clips),
+        clipCount: clipPlan.clips.length,
+        onLog,
+        signal,
+        materialize: sectionFile,
+      }),
   });
 }
 
@@ -366,7 +384,7 @@ async function releaseLocalClips(
     onLog,
     signal,
     prepareWindow: async (clip, index) => {
-      const padded = paddedClipWindow(clip, video.duration);
+      const padded = uploadWindowForClip(clip, clipPlan.story, video.duration);
       const total = clipPlan.clips.length;
       const cutPath = path.join(workDir, `window_${index}.mp4`);
       say(onLog, `Cutting clip window ${index + 1}/${total}…`, {
@@ -374,9 +392,58 @@ async function releaseLocalClips(
         percent: null,
       });
       await cutMediaSection(sourcePath, padded.startSec, padded.durationSec, cutPath);
-      return uploadWindow(cfg, video.id, cutPath, padded, index, total, onLog, signal);
+      return uploadWindow(cfg, video.id, cutPath, padded, index, index, total, "clip window", onLog, signal);
     },
+    prepareStoryWindows: () =>
+      uploadStoryScenes({
+        cfg,
+        videoId: video.id,
+        scenes: scenesWithoutClip(clipPlan.story, clipPlan.clips),
+        clipCount: clipPlan.clips.length,
+        onLog,
+        signal,
+        materialize: async (startSec, durationSec, name) => {
+          const cutPath = path.join(workDir, `${name}.mp4`);
+          await cutMediaSection(sourcePath, startSec, durationSec, cutPath);
+          return cutPath;
+        },
+      }),
   });
+}
+
+async function uploadStoryScenes(input: {
+  cfg: AgentConfig;
+  videoId: string;
+  scenes: Array<{ startSec: number; endSec: number }>;
+  clipCount: number;
+  onLog?: LogFn;
+  signal?: AbortSignal;
+  materialize: (startSec: number, durationSec: number, name: string) => Promise<string>;
+}): Promise<api.ReviewWindow[]> {
+  const uploaded: api.ReviewWindow[] = [];
+  for (const [index, scene] of input.scenes.entries()) {
+    const durationSec = scene.endSec - scene.startSec;
+    say(input.onLog, `Downloading story window ${index + 1}/${input.scenes.length}…`, {
+      phase: "download",
+      percent: 0,
+    });
+    const videoPath = await input.materialize(scene.startSec, durationSec, `story_${index}`);
+    uploaded.push(
+      await uploadWindow(
+        input.cfg,
+        input.videoId,
+        videoPath,
+        { startSec: scene.startSec, durationSec },
+        input.clipCount + index,
+        index,
+        input.scenes.length,
+        "story window",
+        input.onLog,
+        input.signal,
+      ),
+    );
+  }
+  return uploaded;
 }
 
 async function uploadWindow(
@@ -384,13 +451,15 @@ async function uploadWindow(
   videoId: string,
   videoPath: string,
   padded: { startSec: number; durationSec: number },
-  index: number,
+  objectIndex: number,
+  displayIndex: number,
   total: number,
+  label: string,
   onLog?: LogFn,
   signal?: AbortSignal,
 ): Promise<api.ReviewWindow> {
-  say(onLog, `Uploading clip window ${index + 1}/${total}…`, { phase: "upload", percent: 0 });
-  const target = await api.requestUploadUrl(cfg, videoId, "window", "video/mp4", index);
+  say(onLog, `Uploading ${label} ${displayIndex + 1}/${total}…`, { phase: "upload", percent: 0 });
+  const target = await api.requestUploadUrl(cfg, videoId, "window", "video/mp4", objectIndex);
   await putFile(
     target,
     videoPath,
@@ -398,7 +467,7 @@ async function uploadWindow(
       onLog?.({
         phase: "upload",
         percent,
-        detail: `Uploading window ${index + 1} · ${percent}% · ${formatBytes(sent)} of ${formatBytes(size)}`,
+        detail: `Uploading ${label} ${displayIndex + 1} · ${percent}% · ${formatBytes(sent)} of ${formatBytes(size)}`,
       });
     },
     signal,
@@ -424,6 +493,7 @@ async function releaseMoments(input: {
   onLog?: LogFn;
   signal?: AbortSignal;
   prepareWindow: (clip: api.ClipPlanItem, index: number) => Promise<api.ReviewWindow>;
+  prepareStoryWindows?: () => Promise<api.ReviewWindow[]>;
 }): Promise<void> {
   const { cfg, jobId, video, clipPlan, clipLength, onLog, signal } = input;
   let costUsd = clipPlan.costUsd;
@@ -490,7 +560,10 @@ async function releaseMoments(input: {
         await api.renderClip(cfg, jobId, renderBody, signal);
       }
     }
-    await api.finishRender(cfg, jobId, signal);
+    const storyWindows = input.prepareStoryWindows
+      ? await input.prepareStoryWindows()
+      : [];
+    await api.finishRender(cfg, jobId, signal, storyWindows);
     say(onLog, "Every moment is with the renderer.", { phase: "render", percent: 100 });
   } catch (err) {
     if (!isJobCancelledError(err)) {
