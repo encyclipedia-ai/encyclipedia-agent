@@ -16,6 +16,7 @@ import {
   prepareSourceMp4,
   probeMediaFile,
 } from "./media-file.js";
+import { CLIP_CHECK_POOL, rememberCategory, runOrderedPool } from "./clip-pool.js";
 import { scenesWithoutClip, uploadWindowForClip } from "./clip-windows.js";
 import { putFile } from "./upload.js";
 import {
@@ -481,8 +482,8 @@ async function uploadWindow(
 }
 
 /**
- * Check one moment, then hand it to the worker before downloading the next.
- * The worker crops while later windows are still coming down.
+ * Download and check a few moments at once, then hand each one to the
+ * worker in order. The worker still crops one at a time.
  */
 async function releaseMoments(input: {
   cfg: AgentConfig;
@@ -499,67 +500,79 @@ async function releaseMoments(input: {
   let costUsd = clipPlan.costUsd;
   let usageEvents = clipPlan.usageEvents ?? [];
   const total = clipPlan.clips.length;
+  const categories: string[] = [];
+  for (const clip of clipPlan.clips) rememberCategory(categories, clip.category);
+  const roster = clipPlan.clips.map((item) => ({
+    startSec: item.startSec,
+    endSec: item.endSec,
+    durationSec: item.durationSec,
+    ...(item.category ? { category: item.category } : {}),
+    title: item.title,
+  }));
   try {
-    for (const [index, original] of clipPlan.clips.entries()) {
-      const window = await input.prepareWindow(original, index);
-      let clip = original;
-      say(onLog, `Checking clip ${index + 1}/${total} against the video…`, {
-        phase: "analyze",
-        percent: null,
-      });
-      try {
-        const refined = await api.refineJob(
-          cfg,
-          jobId,
-          {
-            windows: [window],
-            clips: [original],
-            clipLength,
-            videoTitle: video.title,
-          },
-          signal,
-        );
-        clip = refined.clips[0] ?? original;
-        const refinedEvents = refined.usageEvents ?? [];
-        if (refined.costUsd + 1e-9 >= costUsd && refinedEvents.length >= usageEvents.length) {
-          costUsd = refined.costUsd;
-          usageEvents = refinedEvents;
-        } else {
-          costUsd += refined.costUsd;
-          usageEvents = [...usageEvents, ...refinedEvents];
+    await runOrderedPool({
+      count: total,
+      limit: CLIP_CHECK_POOL,
+      start: async (index) => {
+        const original = clipPlan.clips[index]!;
+        const window = await input.prepareWindow(original, index);
+        let clip = original;
+        let addedCost = 0;
+        let addedEvents: api.UsageEvent[] = [];
+        say(onLog, `Checking clip ${index + 1}/${total} against the video…`, {
+          phase: "analyze",
+          percent: null,
+        });
+        try {
+          const refined = await api.refineJob(
+            cfg,
+            jobId,
+            {
+              windows: [window],
+              clips: [original],
+              clipLength,
+              videoTitle: video.title,
+              knownCategories: [...categories],
+              scope: "moment",
+            },
+            signal,
+          );
+          clip = refined.clips[0] ?? original;
+          rememberCategory(categories, clip.category);
+          addedCost = refined.costUsd;
+          addedEvents = refined.usageEvents ?? [];
+        } catch (err) {
+          if (isJobCancelledError(err)) throw err;
+          const message = err instanceof Error ? err.message : String(err);
+          say(onLog, `Video check failed (${message}). Keeping the transcript cut.`);
         }
-      } catch (err) {
-        if (isJobCancelledError(err)) throw err;
-        const message = err instanceof Error ? err.message : String(err);
-        say(onLog, `Video check failed (${message}). Keeping the transcript cut.`);
-      }
-      say(
-        onLog,
-        `Rendering clip ${index + 1}/${total}. The next moment downloads while it crops.`,
-        { phase: "render", percent: null },
-      );
-      const renderBody = {
-        video,
-        window,
-        clip,
-        costUsd,
-        usageEvents,
-        expectedCount: total,
-        roster: clipPlan.clips.map((item) => ({
-          startSec: item.startSec,
-          endSec: item.endSec,
-          durationSec: item.durationSec,
-          ...(item.category ? { category: item.category } : {}),
-          title: item.title,
-        })),
-      };
-      try {
-        await api.renderClip(cfg, jobId, renderBody, signal);
-      } catch (err) {
-        if (isJobCancelledError(err)) throw err;
-        await api.renderClip(cfg, jobId, renderBody, signal);
-      }
-    }
+        return { window, clip, addedCost, addedEvents };
+      },
+      finish: async (index, checked) => {
+        costUsd += checked.addedCost;
+        usageEvents = [...usageEvents, ...checked.addedEvents];
+        say(
+          onLog,
+          `Rendering clip ${index + 1}/${total}. Later moments download while it crops.`,
+          { phase: "render", percent: null },
+        );
+        const renderBody = {
+          video,
+          window: checked.window,
+          clip: checked.clip,
+          costUsd,
+          usageEvents,
+          expectedCount: total,
+          roster,
+        };
+        try {
+          await api.renderClip(cfg, jobId, renderBody, signal);
+        } catch (err) {
+          if (isJobCancelledError(err)) throw err;
+          await api.renderClip(cfg, jobId, renderBody, signal);
+        }
+      },
+    });
     const storyWindows = input.prepareStoryWindows
       ? await input.prepareStoryWindows()
       : [];

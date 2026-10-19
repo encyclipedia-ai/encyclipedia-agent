@@ -319,6 +319,8 @@ export function refineJob(
     clips: ClipPlanItem[];
     clipLength: "short" | "medium";
     videoTitle?: string;
+    knownCategories?: string[];
+    scope?: "moment";
   },
   signal?: AbortSignal,
 ) {
