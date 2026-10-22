@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { gunzipSync } from "node:zlib";
+import { downloadGate } from "./download-gate.js";
 import { binDir, ensureHomeDir } from "./paths.js";
 
 const FFMPEG_RELEASE = "b6.1.1";
@@ -230,7 +231,7 @@ export async function refreshYtdlpIfNeeded(
   await withDownloaderLock(async () => {
     const still = ytdlpVersion(dest);
     if (latest && still && compareYtdlpVersion(latest, still) <= 0) return;
-    await installLatestYtdlp(dest);
+    await downloadGate.exclusive(() => installLatestYtdlp(dest));
   });
   return ytdlpVersion(dest) !== current;
 }
