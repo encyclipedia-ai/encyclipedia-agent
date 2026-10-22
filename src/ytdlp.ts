@@ -3,12 +3,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { VideoInfo } from "./api.js";
+import { downloadGate } from "./download-gate.js";
 import {
   AGE_GATE_YT_EXTRACTOR,
   HELPER_EXTRACTOR_FALLBACKS,
   refreshYtdlpIfNeeded,
   toolPaths,
-  withDownloaderLock,
   ytdlpCommonArgs,
   ytdlpEnv,
 } from "./tools.js";
@@ -79,6 +79,11 @@ interface CookieSource {
 }
 
 let preferredCookieSource: CookieSource | null = null;
+
+/** Set once a player client has been accepted, so later windows can overlap. */
+let warmSession: RunOpts | null = null;
+/** Two blocks in one sitting keep the rest of the downloads one at a time. */
+let throttleStrikes = 0;
 
 function parseDownloadProgress(text: string): {
   percent: number;
@@ -207,6 +212,27 @@ function canRotateCookieSource(err: unknown): boolean {
     err instanceof YoutubeBlockedError ||
     looksLikeCookieFailure(err)
   );
+}
+
+function isThrottleError(err: unknown): boolean {
+  return err instanceof YoutubeBlockedError || err instanceof YoutubeRateLimitedError;
+}
+
+function isRecoverableDownloadError(err: unknown): boolean {
+  return (
+    isThrottleError(err) ||
+    needsBrowserCookieRetry(err) ||
+    looksLikeCookieFailure(err) ||
+    err instanceof FormatUnavailableError
+  );
+}
+
+function rememberSession(extra: RunOpts): void {
+  warmSession = {
+    ...(extra.cookiesFromBrowser ? { cookiesFromBrowser: extra.cookiesFromBrowser } : {}),
+    ...(extra.extractorArgs ? { extractorArgs: extra.extractorArgs } : {}),
+    ...(extra.impersonate ? { impersonate: true } : {}),
+  };
 }
 
 function sleep(ms: number): Promise<void> {
@@ -338,8 +364,44 @@ async function run(
   opts: RunOpts = {},
 ): Promise<{ stdout: string; stderr: string }> {
   if (opts.signal?.aborted) throw abortError();
-  return withDownloaderLock(async () => {
-    const tryOnce = (extra: RunOpts = {}) => spawnYtdlp(argv, { ...opts, ...extra });
+  // The first accepted download runs alone. Later windows share two slots.
+  // A second 403 or 429 in the same sitting leaves the gate at one slot.
+  if (warmSession) {
+    const session = warmSession;
+    try {
+      return await downloadGate.shared(async () => {
+        const result = await spawnYtdlp(argv, { ...opts, ...session });
+        rememberSession(session);
+        return result;
+      });
+    } catch (err) {
+      if (!isRecoverableDownloadError(err)) throw err;
+      if (isThrottleError(err)) {
+        throttleStrikes += 1;
+        downloadGate.noteBlocked();
+        if (throttleStrikes >= 2) {
+          process.stderr.write(
+            "  [Librarian/YouTube] backing off to one download at a time…\n",
+          );
+        }
+      }
+      warmSession = null;
+    }
+  }
+  const result = await downloadGate.exclusive(() => runWithFallback(argv, opts));
+  if (throttleStrikes < 2) downloadGate.allowParallel();
+  return result;
+}
+
+async function runWithFallback(
+  argv: string[],
+  opts: RunOpts,
+): Promise<{ stdout: string; stderr: string }> {
+  const tryOnce = async (extra: RunOpts = {}) => {
+    const result = await spawnYtdlp(argv, { ...opts, ...extra });
+    rememberSession(extra);
+    return result;
+  };
 
     const retryWithBrowserLogin = async (): Promise<{ stdout: string; stderr: string }> => {
       opts.onProgress?.({
@@ -451,7 +513,6 @@ async function run(
         throw err;
       }
     }
-  });
 }
 
 export async function dumpVideoInfo(url: string, signal?: AbortSignal): Promise<VideoInfo> {
