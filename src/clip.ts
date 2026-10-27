@@ -17,7 +17,7 @@ import {
   probeMediaFile,
 } from "./media-file.js";
 import { CLIP_CHECK_POOL, rememberCategory, runOrderedPool } from "./clip-pool.js";
-import { scenesWithoutClip, uploadWindowForClip } from "./clip-windows.js";
+import { planSubjectStoryScenes, uploadWindowForClip } from "./clip-windows.js";
 import { putFile } from "./upload.js";
 import {
   downloadAudio,
@@ -365,11 +365,11 @@ async function releaseYoutubeClips(
       const videoPath = await sectionFile(padded.startSec, padded.durationSec, `window_${index}`);
       return uploadWindow(cfg, video.id, videoPath, padded, index, index, total, "clip window", onLog, signal);
     },
-    prepareStoryWindows: () =>
+    prepareStoryWindows: (clips) =>
       uploadStoryScenes({
         cfg,
         videoId: video.id,
-        scenes: scenesWithoutClip(clipPlan.story, clipPlan.clips),
+        scenes: planSubjectStoryScenes(clips, video.duration),
         clipCount: clipPlan.clips.length,
         onLog,
         signal,
@@ -408,11 +408,11 @@ async function releaseLocalClips(
       await cutMediaSection(sourcePath, padded.startSec, padded.durationSec, cutPath);
       return uploadWindow(cfg, video.id, cutPath, padded, index, index, total, "clip window", onLog, signal);
     },
-    prepareStoryWindows: () =>
+    prepareStoryWindows: (clips) =>
       uploadStoryScenes({
         cfg,
         videoId: video.id,
-        scenes: scenesWithoutClip(clipPlan.story, clipPlan.clips),
+        scenes: planSubjectStoryScenes(clips, video.duration),
         clipCount: clipPlan.clips.length,
         onLog,
         signal,
@@ -507,7 +507,7 @@ async function releaseMoments(input: {
   onLog?: LogFn;
   signal?: AbortSignal;
   prepareWindow: (clip: api.ClipPlanItem, index: number) => Promise<api.ReviewWindow>;
-  prepareStoryWindows?: () => Promise<api.ReviewWindow[]>;
+  prepareStoryWindows?: (clips: api.ClipPlanItem[]) => Promise<api.ReviewWindow[]>;
 }): Promise<void> {
   const { cfg, jobId, video, clipPlan, clipLength, onLog, signal } = input;
   let costUsd = clipPlan.costUsd;
@@ -522,6 +522,7 @@ async function releaseMoments(input: {
     ...(item.category ? { category: item.category } : {}),
     title: item.title,
   }));
+  const refinedClips: api.ClipPlanItem[] = clipPlan.clips.map((clip) => ({ ...clip }));
   try {
     await runOrderedPool({
       count: total,
@@ -562,6 +563,7 @@ async function releaseMoments(input: {
         return { window, clip, addedCost, addedEvents };
       },
       finish: async (index, checked) => {
+        refinedClips[index] = checked.clip;
         costUsd += checked.addedCost;
         usageEvents = [...usageEvents, ...checked.addedEvents];
         say(
@@ -587,7 +589,7 @@ async function releaseMoments(input: {
       },
     });
     const storyWindows = input.prepareStoryWindows
-      ? await input.prepareStoryWindows()
+      ? await input.prepareStoryWindows(refinedClips)
       : [];
     await api.finishRender(cfg, jobId, signal, storyWindows);
     say(onLog, "Every moment is with the renderer.", { phase: "render", percent: 100 });
