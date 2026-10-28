@@ -425,6 +425,9 @@ async function releaseLocalClips(
   });
 }
 
+/** How many story windows to download/upload at once (matches download slots). */
+const STORY_UPLOAD_POOL = 2;
+
 async function uploadStoryScenes(input: {
   cfg: AgentConfig;
   videoId: string;
@@ -434,16 +437,22 @@ async function uploadStoryScenes(input: {
   signal?: AbortSignal;
   materialize: (startSec: number, durationSec: number, name: string) => Promise<string>;
 }): Promise<api.ReviewWindow[]> {
-  const uploaded: api.ReviewWindow[] = [];
-  for (const [index, scene] of input.scenes.entries()) {
-    const durationSec = scene.endSec - scene.startSec;
-    say(input.onLog, `Downloading story window ${index + 1}/${input.scenes.length}…`, {
-      phase: "download",
-      percent: 0,
-    });
-    const videoPath = await input.materialize(scene.startSec, durationSec, `story_${index}`);
-    uploaded.push(
-      await uploadWindow(
+  const uploaded: api.ReviewWindow[] = new Array(input.scenes.length);
+  let next = 0;
+  const workers = Math.max(1, Math.min(STORY_UPLOAD_POOL, input.scenes.length));
+  const run = async () => {
+    while (true) {
+      const index = next;
+      next += 1;
+      if (index >= input.scenes.length) return;
+      const scene = input.scenes[index]!;
+      const durationSec = scene.endSec - scene.startSec;
+      say(input.onLog, `Downloading story window ${index + 1}/${input.scenes.length}…`, {
+        phase: "download",
+        percent: 0,
+      });
+      const videoPath = await input.materialize(scene.startSec, durationSec, `story_${index}`);
+      uploaded[index] = await uploadWindow(
         input.cfg,
         input.videoId,
         videoPath,
@@ -454,9 +463,10 @@ async function uploadStoryScenes(input: {
         "story window",
         input.onLog,
         input.signal,
-      ),
-    );
-  }
+      );
+    }
+  };
+  await Promise.all(Array.from({ length: workers }, () => run()));
   return uploaded;
 }
 

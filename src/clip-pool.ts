@@ -1,9 +1,9 @@
 /**
  * Download and Gemini-check a few windows at once, then hand them to the
- * cropper in stream order. Three is enough to hide the wait without
- * sending every moment to Gemini at the same time.
+ * cropper in stream order. Four hides more of the Gemini wait without
+ * flooding the Files API.
  */
-export const CLIP_CHECK_POOL = 3;
+export const CLIP_CHECK_POOL = 4;
 
 export function rememberCategory(names: string[], category: string | undefined): void {
   const name = category?.trim();
