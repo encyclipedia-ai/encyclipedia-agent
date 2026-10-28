@@ -20,14 +20,15 @@ test("paddedClipWindow does not start before zero", () => {
   assert.equal(window.durationSec, 20 + CLIP_WINDOW_PAD_SEC);
 });
 
-test("uploadWindowForClip covers the transcript scene around the short", () => {
+test("uploadWindowForClip pads the short and ignores the long story scene", () => {
   const window = uploadWindowForClip(
     { startSec: 200, endSec: 220, durationSec: 20 },
     [{ startSec: 120, endSec: 280 }],
     1000,
   );
-  assert.equal(window.startSec, 120);
-  assert.equal(window.durationSec, 160);
+  // Story footage is uploaded separately; Gemini only gets ±pad around the short.
+  assert.equal(window.startSec, 200 - CLIP_WINDOW_PAD_SEC);
+  assert.equal(window.durationSec, 20 + CLIP_WINDOW_PAD_SEC * 2);
 });
 
 test("uploadWindowForClip stays within the review limit", () => {
