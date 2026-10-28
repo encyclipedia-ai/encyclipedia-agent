@@ -16,6 +16,12 @@ export const SUBJECT_BRIDGE_SEC = 3 * 60;
 /** Breath kept on each edge of a subject discussion. */
 export const STORY_CONTEXT_SEC = 20;
 
+/**
+ * A subject cut shorter than this is not worth a summary upload.
+ * Lone viral peaks stay shorts; only longer discussions become summaries.
+ */
+export const MIN_SUMMARY_SEC = 5 * 60;
+
 export type TimedClip = {
   startSec: number;
   endSec: number;
@@ -98,7 +104,9 @@ export function planSubjectStoryScenes(
       const startSec = Math.max(0, cluster[0]!.startSec - STORY_CONTEXT_SEC);
       let endSec = clipEnd(cluster[cluster.length - 1]!) + STORY_CONTEXT_SEC;
       if (videoDurationSec > 0) endSec = Math.min(videoDurationSec, endSec);
-      scenes.push(...chunkStoryScene({ startSec, endSec }));
+      if (endSec - startSec >= MIN_SUMMARY_SEC) {
+        scenes.push(...chunkStoryScene({ startSec, endSec }));
+      }
       cluster = [];
     };
     for (const clip of ordered) {

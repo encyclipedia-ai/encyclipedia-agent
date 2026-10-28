@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   MAX_STORY_UPLOAD_SEC,
+  MIN_SUMMARY_SEC,
   planSubjectStoryScenes,
   STORY_CONTEXT_SEC,
   SUBJECT_BRIDGE_SEC,
@@ -12,28 +13,37 @@ describe("planSubjectStoryScenes", () => {
   it("keeps the conversation between same-subject moments", () => {
     const scenes = planSubjectStoryScenes([
       { startSec: 10, endSec: 25, durationSec: 15, category: "The office interview" },
-      { startSec: 95, endSec: 115, durationSec: 20, category: "The office interview" },
+      { startSec: 95, endSec: 310, durationSec: 215, category: "The office interview" },
     ]);
     assert.equal(scenes.length, 1);
     assert.equal(scenes[0]?.startSec, Math.max(0, 10 - STORY_CONTEXT_SEC));
-    assert.equal(scenes[0]?.endSec, 115 + STORY_CONTEXT_SEC);
+    assert.equal(scenes[0]?.endSec, 310 + STORY_CONTEXT_SEC);
+    assert.ok(scenes[0]!.endSec - scenes[0]!.startSec >= MIN_SUMMARY_SEC);
   });
 
-  it("splits different subjects", () => {
+  it("splits different subjects that are long enough", () => {
     const scenes = planSubjectStoryScenes([
-      { startSec: 10, endSec: 25, durationSec: 15, category: "PhotoJoe lies" },
-      { startSec: 200, endSec: 220, durationSec: 20, category: "Turbo reacts" },
+      { startSec: 10, endSec: 300, durationSec: 290, category: "PhotoJoe lies" },
+      { startSec: 400, endSec: 720, durationSec: 320, category: "Turbo reacts" },
     ]);
     assert.equal(scenes.length, 2);
   });
 
+  it("drops a lone short subject", () => {
+    const scenes = planSubjectStoryScenes([
+      { startSec: 10, endSec: 25, durationSec: 15, category: "PhotoJoe lies" },
+      { startSec: 200, endSec: 220, durationSec: 20, category: "Turbo reacts" },
+    ]);
+    assert.deepEqual(scenes, []);
+  });
+
   it("splits a subject that returns after a long gap", () => {
     const scenes = planSubjectStoryScenes([
-      { startSec: 10, endSec: 25, durationSec: 15, category: "Same" },
+      { startSec: 10, endSec: 300, durationSec: 290, category: "Same" },
       {
-        startSec: 25 + SUBJECT_BRIDGE_SEC + 10,
-        endSec: 25 + SUBJECT_BRIDGE_SEC + 30,
-        durationSec: 20,
+        startSec: 300 + SUBJECT_BRIDGE_SEC + 10,
+        endSec: 300 + SUBJECT_BRIDGE_SEC + 320,
+        durationSec: 310,
         category: "Same",
       },
     ]);
@@ -42,11 +52,10 @@ describe("planSubjectStoryScenes", () => {
 
   it("chunks a very long discussion for upload", () => {
     const scenes = planSubjectStoryScenes([
-      { startSec: 0, endSec: 20, durationSec: 20, category: "Long talk" },
       {
-        startSec: MAX_STORY_UPLOAD_SEC + 60,
+        startSec: 0,
         endSec: MAX_STORY_UPLOAD_SEC + 80,
-        durationSec: 20,
+        durationSec: MAX_STORY_UPLOAD_SEC + 80,
         category: "Long talk",
       },
     ]);
