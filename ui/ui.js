@@ -16,7 +16,6 @@ const passwordInput = $("password");
 const togglePassword = $("toggle-password");
 const queueEl = $("queue");
 const queueEmpty = $("queue-empty");
-const queueSummary = $("queue-summary");
 const updateCard = $("update-card");
 const updateDot = $("update-dot");
 const updateLabel = $("update-label");
@@ -53,96 +52,93 @@ function shortUrl(url) {
   }
 }
 
+const ACTIVE_PHASES = new Set([
+  "queued",
+  "lookup",
+  "download",
+  "analyze",
+  "upload",
+  "render",
+]);
+
+const PHASE_RANK = {
+  lookup: 0,
+  download: 1,
+  analyze: 2,
+  upload: 3,
+  queued: 4,
+  render: 5,
+};
+
 function renderQueue(items) {
-  const list = Array.isArray(items) ? items.slice() : [];
-  const active = list.filter((item) =>
-    ["lookup", "download", "analyze", "upload"].includes(item.phase),
-  ).length;
-  const waiting = list.filter((item) => item.phase === "queued").length;
-  const rendering = list.filter((item) => item.phase === "render").length;
-  queueSummary.textContent = [
-    `${active} active`,
-    waiting ? `${waiting} waiting` : null,
-    rendering ? `${rendering} rendering` : null,
-  ]
-    .filter(Boolean)
-    .join(" · ");
-  const rank = {
-    lookup: 0,
-    download: 1,
-    analyze: 2,
-    upload: 3,
-    queued: 4,
-    render: 5,
-    error: 6,
-    cancelled: 7,
-    done: 8,
-  };
-  list.sort((a, b) => (rank[a.phase] ?? 9) - (rank[b.phase] ?? 9) || a.addedAt - b.addedAt);
-  const waitingIds = list
-    .filter((item) => item.phase === "queued")
-    .map((item) => item.id);
+  const list = (Array.isArray(items) ? items : [])
+    .filter((item) => ACTIVE_PHASES.has(item.phase))
+    .sort(
+      (a, b) =>
+        (PHASE_RANK[a.phase] ?? 9) - (PHASE_RANK[b.phase] ?? 9) ||
+        a.addedAt - b.addedAt,
+    );
+  const item = list[0];
   queueEl.replaceChildren();
-  queueEmpty.classList.toggle("hidden", list.length > 0);
-  for (const item of list) {
-    const li = document.createElement("li");
-    li.className = `queue-item phase-${item.phase}`;
-    const title = document.createElement("div");
-    title.className = "queue-title";
-    title.textContent = item.title || shortUrl(item.url);
-    const meta = document.createElement("div");
-    meta.className = "queue-meta";
-    const phase = document.createElement("span");
-    phase.className = "queue-phase";
-    phase.textContent = PHASE_LABEL[item.phase] ?? item.phase;
-    meta.append(phase);
-    if (item.source === "remote") {
-      const src = document.createElement("span");
-      src.className = "queue-source";
-      const recut =
-        item.kind === "recut" ||
-        (Number.isFinite(Number(item.startSec)) &&
-          Number.isFinite(Number(item.durationSec)) &&
-          Number(item.durationSec) > 0);
-      src.textContent = recut ? "Clip edit" : "From the web";
-      meta.append(src);
-    }
-    if (item.editVersion > 1) {
-      const ver = document.createElement("span");
-      ver.className = "queue-version";
-      ver.textContent = `v${item.editVersion}`;
-      meta.append(ver);
-    }
-    const detail = document.createElement("p");
-    detail.className = "queue-detail";
-    const position = waitingIds.indexOf(item.id);
-    detail.textContent =
-      item.phase === "queued" && position >= 0
-        ? `Waiting · ${position + 1} of ${waitingIds.length} in line`
-        : item.detail || "";
-    li.append(title, meta, detail);
-    if (!["done", "error", "cancelled"].includes(item.phase)) {
-      const cancel = document.createElement("button");
-      cancel.type = "button";
-      cancel.className = "queue-cancel";
-      cancel.dataset.cancelId = item.id;
-      cancel.textContent = "Cancel";
-      li.append(cancel);
-    }
-    if (item.percent != null && (item.phase === "download" || item.phase === "upload")) {
-      const bar = document.createElement("div");
-      bar.className = "bar";
-      bar.setAttribute("role", "progressbar");
-      bar.setAttribute("aria-valuemin", "0");
-      bar.setAttribute("aria-valuemax", "100");
-      bar.setAttribute("aria-valuenow", String(Math.round(item.percent)));
-      const fill = document.createElement("span");
-      fill.style.width = `${Math.max(0, Math.min(100, item.percent))}%`;
-      bar.append(fill);
-      li.append(bar);
-    }
-    queueEl.append(li);
+  queueEmpty.classList.toggle("hidden", Boolean(item));
+  if (!item) return;
+
+  const li = document.createElement("li");
+  li.className = `queue-item phase-${item.phase}`;
+  const title = document.createElement("div");
+  title.className = "queue-title";
+  title.textContent = item.title || shortUrl(item.url);
+  const meta = document.createElement("div");
+  meta.className = "queue-meta";
+  const phase = document.createElement("span");
+  phase.className = "queue-phase";
+  phase.textContent = PHASE_LABEL[item.phase] ?? item.phase;
+  meta.append(phase);
+  if (item.source === "remote") {
+    const src = document.createElement("span");
+    src.className = "queue-source";
+    const recut =
+      item.kind === "recut" ||
+      (Number.isFinite(Number(item.startSec)) &&
+        Number.isFinite(Number(item.durationSec)) &&
+        Number(item.durationSec) > 0);
+    src.textContent = recut ? "Clip edit" : "From the web";
+    meta.append(src);
   }
+  if (item.editVersion > 1) {
+    const ver = document.createElement("span");
+    ver.className = "queue-version";
+    ver.textContent = `v${item.editVersion}`;
+    meta.append(ver);
+  }
+  const detail = document.createElement("p");
+  detail.className = "queue-detail";
+  detail.textContent =
+    item.phase === "queued"
+      ? list.length > 1
+        ? `Waiting · ${list.length} in line`
+        : "Waiting"
+      : item.detail || "";
+  li.append(title, meta, detail);
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.className = "queue-cancel";
+  cancel.dataset.cancelId = item.id;
+  cancel.textContent = "Cancel";
+  li.append(cancel);
+  if (item.percent != null && (item.phase === "download" || item.phase === "upload")) {
+    const bar = document.createElement("div");
+    bar.className = "bar";
+    bar.setAttribute("role", "progressbar");
+    bar.setAttribute("aria-valuemin", "0");
+    bar.setAttribute("aria-valuemax", "100");
+    bar.setAttribute("aria-valuenow", String(Math.round(item.percent)));
+    const fill = document.createElement("span");
+    fill.style.width = `${Math.max(0, Math.min(100, item.percent))}%`;
+    bar.append(fill);
+    li.append(bar);
+  }
+  queueEl.append(li);
 }
 
 function apply(snap) {
@@ -254,12 +250,12 @@ queueEl.addEventListener("click", (event) => {
 
 clipForm.addEventListener("submit", async (event) => {
   event.preventDefault();
-  const length = document.querySelector('input[name="length"]:checked')?.value ?? "short";
   clipBtn.disabled = true;
   try {
     const picked = await window.helper.pickClip();
     if (!picked || picked.cancelled || !picked.path) return;
-    await window.helper.clipFile(picked.path, length);
+    // Length is chosen server-side; keep the short default for the API.
+    await window.helper.clipFile(picked.path, "short");
   } catch (err) {
     statusMessage.textContent = err instanceof Error ? err.message : String(err);
   } finally {

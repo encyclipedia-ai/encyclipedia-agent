@@ -90,25 +90,11 @@
     <section id="clipper" class="card hidden">
       <h2 class="card-title">Request a clipping</h2>
       <form id="clip-form">
-        <div class="row lengths">
-          <label class="choice">
-            <input type="radio" name="length" value="short" checked />
-            Short
-          </label>
-          <label class="choice">
-            <input type="radio" name="length" value="medium" />
-            Medium
-          </label>
-        </div>
         <button id="clip" type="submit">Choose a video to clip</button>
       </form>
       <section id="queue-wrap" class="queue-wrap">
-        <div class="row queue-header">
-          <h3 class="queue-heading">Job queue</h3>
-          <span id="queue-summary" class="muted">0 active</span>
-        </div>
         <ol id="queue" class="queue"></ol>
-        <p id="queue-empty" class="hint">No jobs in the queue. Choose a video file to begin.</p>
+        <p id="queue-empty" class="hint">No active job. Choose a video file to begin.</p>
       </section>
       <p class="hint">
         Leave this window open. Jobs from the web app or phone also run here.
