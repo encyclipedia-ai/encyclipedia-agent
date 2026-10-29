@@ -27,6 +27,7 @@ import {
   dumpVideoInfo,
   sweepDownloadTemps,
 } from "./ytdlp.js";
+import { extractAudioEvents } from "./audio-events.js";
 
 const TERMINAL = new Set(["done", "error", "cancelled"]);
 
@@ -87,7 +88,7 @@ export async function ingestSource(
   sweepDownloadTemps();
   const workDir = await fs.mkdtemp(path.join(os.tmpdir(), "encyclipedia-agent-"));
   try {
-    const segments = await transcriptFromYoutube(
+    const { segments, audioPath } = await transcriptFromYoutube(
       cfg,
       url,
       video.id,
@@ -96,6 +97,7 @@ export async function ingestSource(
       onLog,
       opts.signal,
     );
+    const audioEvents = await audioEventsFromPath(audioPath, onLog);
     const clipPlan = await analyzeSegments(
       cfg,
       segments,
@@ -104,6 +106,7 @@ export async function ingestSource(
       opts.jobId,
       onLog,
       opts.signal,
+      audioEvents,
     );
     await releaseYoutubeClips(
       cfg,
@@ -129,7 +132,7 @@ async function transcriptFromYoutube(
   workDir: string,
   onLog?: LogFn,
   signal?: AbortSignal,
-): Promise<api.TranscriptSegment[]> {
+): Promise<{ segments: api.TranscriptSegment[]; audioPath: string | null }> {
   say(onLog, "Checking captions…", { phase: "download", percent: null });
   const captionsPath = await downloadCaptions(
     url,
@@ -143,9 +146,81 @@ async function transcriptFromYoutube(
     },
     signal,
   );
-  const segments = captionsPath ? await segmentsFromCaptions(captionsPath, onLog) : null;
-  if (segments && segments.length > 0) return segments;
-  return transcribeFromYoutubeAudio(cfg, url, videoId, jobId, workDir, onLog, signal);
+  const captionSegments = captionsPath ? await segmentsFromCaptions(captionsPath, onLog) : null;
+
+  // Always pull audio when possible: Whisper needs it without captions, and
+  // the transcript scout uses energy/silence markers even when captions exist.
+  let audioPath: string | null = null;
+  try {
+    say(
+      onLog,
+      captionSegments && captionSegments.length > 0
+        ? "Downloading audio for energy analysis…"
+        : "No captions found. Downloading audio to transcribe…",
+      { phase: "download", percent: 0 },
+    );
+    audioPath = await downloadAudio(
+      url,
+      workDir,
+      (update) => {
+        onLog?.({
+          phase: "download",
+          percent: update.percent,
+          detail: update.detail,
+        });
+      },
+      signal,
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (captionSegments && captionSegments.length > 0) {
+      say(onLog, `Audio download skipped (${message}). Continuing with captions only.`);
+    } else {
+      throw err;
+    }
+  }
+
+  if (captionSegments && captionSegments.length > 0) {
+    return { segments: captionSegments, audioPath };
+  }
+  if (!audioPath) {
+    throw new Error("No captions and no audio were available to transcribe.");
+  }
+  const transcribed = await uploadAudioAndTranscribe(
+    cfg,
+    videoId,
+    jobId,
+    audioPath,
+    onLog,
+    signal,
+  );
+  return { segments: transcribed.segments, audioPath };
+}
+
+async function audioEventsFromPath(
+  audioPath: string | null,
+  onLog?: LogFn,
+): Promise<api.AudioEvent[] | undefined> {
+  if (!audioPath) return undefined;
+  say(onLog, "Analyzing audio energy…", { phase: "analyze", percent: null });
+  try {
+    const events = await extractAudioEvents(audioPath);
+    if (events.length === 0) {
+      say(onLog, "No strong audio peaks found. Continuing with the transcript.");
+      return undefined;
+    }
+    say(
+      onLog,
+      events.length === 1
+        ? "Found 1 audio marker for the transcript scout"
+        : `Found ${events.length} audio markers for the transcript scout`,
+    );
+    return events;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    say(onLog, `Audio analysis skipped (${message}). Continuing with the transcript.`);
+    return undefined;
+  }
 }
 
 async function segmentsFromCaptions(
@@ -165,35 +240,6 @@ async function segmentsFromCaptions(
     say(onLog, `Captions could not be parsed (${message}). Librarian will transcribe the audio instead.`);
     return null;
   }
-}
-
-async function transcribeFromYoutubeAudio(
-  cfg: AgentConfig,
-  url: string,
-  videoId: string,
-  jobId: string,
-  workDir: string,
-  onLog?: LogFn,
-  signal?: AbortSignal,
-): Promise<api.TranscriptSegment[]> {
-  say(onLog, "No captions found. Downloading audio to transcribe…", {
-    phase: "download",
-    percent: 0,
-  });
-  const audioPath = await downloadAudio(
-    url,
-    workDir,
-    (update) => {
-      onLog?.({
-        phase: "download",
-        percent: update.percent,
-        detail: update.detail,
-      });
-    },
-    signal,
-  );
-  const transcribed = await uploadAudioAndTranscribe(cfg, videoId, jobId, audioPath, onLog, signal);
-  return transcribed.segments;
 }
 
 async function uploadAudioAndTranscribe(
@@ -242,6 +288,7 @@ async function analyzeSegments(
   jobId: string,
   onLog?: LogFn,
   signal?: AbortSignal,
+  audioEvents?: api.AudioEvent[],
 ): Promise<api.ClipPlan> {
   say(onLog, "Scanning the transcript for viral moments…", { phase: "analyze", percent: null });
   const plan = await api.analyzeJob(
@@ -249,6 +296,7 @@ async function analyzeSegments(
     jobId,
     {
       segments,
+      ...(audioEvents && audioEvents.length > 0 ? { audioEvents } : {}),
       clipLength,
       videoTitle: video.title,
     },
@@ -713,6 +761,7 @@ export async function handoffLocalFile(
       onLog,
       linked.signal,
     );
+    const audioEvents = await audioEventsFromPath(audioPath, onLog);
     const clipPlan = await analyzeSegments(
       cfg,
       segments,
@@ -721,6 +770,7 @@ export async function handoffLocalFile(
       jobId,
       onLog,
       linked.signal,
+      audioEvents,
     );
     await releaseLocalClips(
       cfg,
