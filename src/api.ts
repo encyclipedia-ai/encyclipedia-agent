@@ -62,6 +62,16 @@ export interface TranscriptSegment {
   text: string;
 }
 
+export type AudioEventKind = "loud_peak" | "energy_rise" | "silence";
+
+/** Heuristic audio marker from local ffmpeg analysis (not ASR). */
+export interface AudioEvent {
+  start: number;
+  end: number;
+  kind: AudioEventKind;
+  intensity?: number;
+}
+
 export interface UsageEvent {
   kind: "clip_detection" | "layout_vision";
   model: string;
@@ -259,6 +269,7 @@ export function analyze(
   cfg: AgentConfig,
   body: {
     segments: TranscriptSegment[];
+    audioEvents?: AudioEvent[];
     clipLength: "short" | "medium";
     video: VideoInfo;
     videoTitle?: string;
@@ -294,6 +305,7 @@ export function analyzeJob(
   jobId: string,
   body: {
     segments: TranscriptSegment[];
+    audioEvents?: AudioEvent[];
     clipLength: "short" | "medium";
     videoTitle?: string;
   },
